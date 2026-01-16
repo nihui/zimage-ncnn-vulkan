@@ -412,8 +412,6 @@ int main()
         t_embedder.opt.use_fp16_packed = false;
         t_embedder.opt.use_fp16_storage = false;
         t_embedder.opt.use_fp16_arithmetic = false;
-        t_embedder.opt.use_bf16_packed = false;
-        t_embedder.opt.use_bf16_storage = false;
         t_embedder.opt.use_bf16_packed = use_bf16;
         t_embedder.opt.use_bf16_storage = use_bf16;
         t_embedder.load_param("z_image_turbo_transformer_t_embedder.ncnn.param");
