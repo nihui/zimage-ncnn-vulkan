@@ -14,6 +14,14 @@ https://github.com/Tongyi-MAI/Z-Image
 
 ## Usages
 
+Currently, this program requires a Vulkan capable graphics card with at least 16GB of VRAM to run.
+
+Further performance and video memory usage optimizations are underway. Please stay tuned :)
+
+### prepare model files
+
+https://huggingface.co/nihui-szyl/z-image-ncnn/tree/main/z-image-turbo
+
 TBA
 
 ## Build from Source
