@@ -1,10 +1,10 @@
-# Z-Image ncnn
+# Z-Image ncnn Vulkan
 
 :exclamation: :exclamation: :exclamation: This software is in the early development stage, it may bite your cat
 
 ncnn implementation of Z-Image image generater.
 
-z-image-ncnn uses [ncnn project](https://github.com/Tencent/ncnn) as the universal neural network inference framework.
+zimage-ncnn-vulkan uses [ncnn project](https://github.com/Tencent/ncnn) as the universal neural network inference framework.
 
 ## About Z-Image
 
@@ -24,11 +24,24 @@ Further performance and video memory usage optimizations are underway. Please st
 
 https://huggingface.co/nihui-szyl/z-image-ncnn/tree/main/z-image-turbo
 
-TBA
-
 ## Build from Source
 
-TBA
+1. Clone this project with all submodules
+
+```shell
+git clone https://github.com/nihui/zimage-ncnn-vulkan.git
+cd zimage-ncnn-vulkan
+git submodule update --init --recursive --depth 1
+```
+
+2. Build with CMake
+
+```shell
+mkdir build
+cd build
+cmake ../src
+cmake --build . -j 4
+```
 
 ## Sample Images
 
@@ -58,3 +71,7 @@ seed=777
 
 - https://github.com/Tencent/ncnn for fast neural network inference on ALL PLATFORMS
 - https://github.com/futz12/ncnn_llm for BPE tokenizer
+- https://github.com/webmproject/libwebp for encoding and decoding Webp images on ALL PLATFORMS
+- https://github.com/libjpeg-turbo/libjpeg-turbo for encoding and decoding JPEG images on ALL PLATFORMS
+- https://github.com/pnggroup/libpng for encoding and decoding PNG images on ALL PLATFORMS
+- https://github.com/zlib-ng/zlib-ng for encoding and decoding PNG images on ALL PLATFORMS
