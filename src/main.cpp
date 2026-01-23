@@ -637,7 +637,7 @@ int main()
         vae_out.to_pixels((unsigned char*)rgb.data, ncnn::Mat::PIXEL_RGB);
 
 #if _WIN32
-        wic_encode_image("out.png", rgb.w, rgb.h, rgb.elempack, rgb.data);
+        wic_encode_image(L"out.png", rgb.w, rgb.h, rgb.elempack, rgb.data);
 #else
         png_save("out.png", rgb.w, rgb.h, rgb.elempack, (const unsigned char*)rgb.data);
 #endif
