@@ -632,13 +632,17 @@ int main()
         const float norm_vals[3] = {127.5f, 127.5f, 127.5f};
         vae_out.substract_mean_normalize(mean_vals, norm_vals);
 
+#if _WIN32
+        ncnn::Mat bgr(width, height, (size_t)3u, 3);
+
+        vae_out.to_pixels((unsigned char*)bgr.data, ncnn::Mat::PIXEL_RGB2BGR);
+
+        wic_encode_image(L"out.png", bgr.w, bgr.h, bgr.elempack, bgr.data);
+#else
         ncnn::Mat rgb(width, height, (size_t)3u, 3);
 
         vae_out.to_pixels((unsigned char*)rgb.data, ncnn::Mat::PIXEL_RGB);
 
-#if _WIN32
-        wic_encode_image(L"out.png", rgb.w, rgb.h, rgb.elempack, rgb.data);
-#else
         png_save("out.png", rgb.w, rgb.h, rgb.elempack, (const unsigned char*)rgb.data);
 #endif
     }
