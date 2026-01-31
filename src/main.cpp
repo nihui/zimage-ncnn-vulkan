@@ -1,10 +1,12 @@
 // z-image implemented with ncnn library
 
-#include <stdio.h>
-#include <string.h>
 #include <float.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #include <random>
 
@@ -16,10 +18,107 @@
 #include "png_image.h"
 #endif // _WIN32
 
-#include "bpe_tokenizer.h"
+#if _WIN32
+#include <wchar.h>
+static wchar_t* optarg = NULL;
+static int optind = 1;
+static wchar_t getopt(int argc, wchar_t* const argv[], const wchar_t* optstring)
+{
+    if (optind >= argc || argv[optind][0] != L'-')
+        return -1;
 
+    wchar_t opt = argv[optind][1];
+    const wchar_t* p = wcschr(optstring, opt);
+    if (p == NULL)
+        return L'?';
+
+    optarg = NULL;
+
+    if (p[1] == L':')
+    {
+        optind++;
+        if (optind >= argc)
+            return L'?';
+
+        optarg = argv[optind];
+    }
+
+    optind++;
+
+    return opt;
+}
+
+static std::vector<int> parse_optarg_int_array(const wchar_t* optarg)
+{
+    std::vector<int> array;
+    array.push_back(_wtoi(optarg));
+
+    const wchar_t* p = wcschr(optarg, L',');
+    while (p)
+    {
+        p++;
+        array.push_back(_wtoi(p));
+        p = wcschr(p, L',');
+    }
+
+    return array;
+}
+
+static std::string wstring_to_utf8_string(const std::wstring& wstr)
+{
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string result(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), &result[0], size_needed, NULL, NULL);
+    return result;
+}
+
+static std::wstring utf8_string_to_wstring(const std::string& str)
+{
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), NULL, 0);
+    std::wstring result(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &result[0], size_needed);
+    return result;
+}
+#else // _WIN32
+#include <unistd.h> // getopt()
+
+static std::vector<int> parse_optarg_int_array(const char* optarg)
+{
+    std::vector<int> array;
+    array.push_back(atoi(optarg));
+
+    const char* p = strchr(optarg, ',');
+    while (p)
+    {
+        p++;
+        array.push_back(atoi(p));
+        p = strchr(p, ',');
+    }
+
+    return array;
+}
+#endif // _WIN32
+
+// ncnn
 #include "mat.h"
 #include "net.h"
+
+#include "filesystem_utils.h"
+
+#include "bpe_tokenizer.h"
+
+static void print_usage()
+{
+    fprintf(stdout, "Usage: zimage-ncnn-vulkan -p prompt -o outfile [options]...\n\n");
+    fprintf(stdout, "  -h                   show this help\n");
+    fprintf(stdout, "  -p prompt            prompt (default=rand)\n");
+    fprintf(stdout, "  -n negative-prompt   negative prompt (optional)\n");
+    fprintf(stdout, "  -o output-path       output image path (default=out.png)\n");
+    fprintf(stdout, "  -s image-size        image resolution (default=1024,1024)\n");
+    fprintf(stdout, "  -l steps             denoise steps (default=9)\n");
+    fprintf(stdout, "  -r random-seed       random seed (default=rand)\n");
+    fprintf(stdout, "  -g gpu-id            gpu device to use (-1=cpu, default=auto)\n");
+}
 
 static void generate_rope_embed_cache(int seqlen, int embed_dim, int position_id, ncnn::Mat& cos_cache, ncnn::Mat& sin_cache)
 {
@@ -149,24 +248,154 @@ static void rope_embbedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& 
     }
 }
 
-int main()
+#if _WIN32
+int wmain(int argc, wchar_t** argv)
+#else
+int main(int argc, char** argv)
+#endif
 {
-    // const char* prompt = "風的彷徨.";
-    const char* prompt = "風的彷徨.美少女.半身照.";
-    const int width = 1024;
-    const int height = 1024;
-    // const int width = 512;
-    // const int height = 512;
-    const int steps = 9;
-    const int seed = 777;
+    srand(time(NULL));
 
-    const int gpuid = ncnn::get_default_gpu_index();
-    const bool use_gpu = true;
-    const bool use_bf16 = true;
+#if _WIN32
+    path_t prompt = L"A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.";
+    path_t negative_prompt;
+    path_t output_path = L"out.png";
+#else
+    path_t prompt = "A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.";
+    path_t negative_prompt;
+    path_t output_path = "out.png";
+#endif
+    int width = 1024;
+    int height = 1024;
+    int steps = 9;
+    int seed = rand();
+    int gpuid = ncnn::get_default_gpu_index();
+
+#if _WIN32
+    setlocale(LC_ALL, "");
+    wchar_t opt;
+    while ((opt = getopt(argc, argv, L"p:n:o:s:l:r:g:h")) != (wchar_t)-1)
+    {
+        switch (opt)
+        {
+        case L'p':
+            prompt = optarg;
+            break;
+        case L'n':
+            negative_prompt = optarg;
+            break;
+        case L'o':
+            output_path = optarg;
+            break;
+        case L's':
+        {
+            std::vector<int> list = parse_optarg_int_array(optarg);
+            if (list.size() != 2)
+            {
+                print_usage();
+                return -1;
+            }
+            width = list[0];
+            height = list[1];
+            break;
+        }
+        case L'l':
+            steps = _wtoi(optarg);
+            break;
+        case L'r':
+            seed = _wtoi(optarg);
+            break;
+        case L'g':
+            gpuid = _wtoi(optarg);
+            break;
+        case L'h':
+        default:
+            print_usage();
+            return -1;
+        }
+    }
+#else // _WIN32
+    int opt;
+    while ((opt = getopt(argc, argv, "p:n:o:s:l:r:g:h")) != -1)
+    {
+        switch (opt)
+        {
+        case 'p':
+            prompt = optarg;
+            break;
+        case 'n':
+            negative_prompt = optarg;
+            break;
+        case 'o':
+            output_path = optarg;
+            break;
+        case 's':
+        {
+            std::vector<int> list = parse_optarg_int_array(optarg);
+            if (list.size() != 2)
+            {
+                print_usage();
+                return -1;
+            }
+            width = list[0];
+            height = list[1];
+            break;
+        }
+        case 'l':
+            steps = atoi(optarg);
+            break;
+        case 'r':
+            seed = atoi(optarg);
+            break;
+        case 'g':
+            gpuid = atoi(optarg);
+            break;
+        case 'h':
+        default:
+            print_usage();
+            return -1;
+        }
+    }
+#endif // _WIN32
+
+    if (prompt.empty() || output_path.empty())
+    {
+        print_usage();
+        return -1;
+    }
 
     // assert width % 16 == 0
     // assert height % 16 == 0
     // assert (width / 16) * (height / 16) >= 32
+
+    if (width % 16 != 0 || height % 16 != 0)
+    {
+        fprintf(stderr, "width and height must be multiple of 16 but got %d and %d\n", width, height);
+        return -1;
+    }
+
+    if ((width / 16) * (height / 16) < 32)
+    {
+        fprintf(stderr, "(width / 16) * (height / 16) must be >= 32\n");
+        return -1;
+    }
+
+#if _WIN32
+    fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());
+    fwprintf(stderr, L"negative-prompt = %ls\n", negative_prompt.c_str());
+    fwprintf(stderr, L"output-path = %ls\n", output_path.c_str());
+#else
+    fprintf(stderr, "prompt = %s\n", prompt.c_str());
+    fprintf(stderr, "negative-prompt = %s\n", negative_prompt.c_str());
+    fprintf(stderr, "output-path = %s\n", output_path.c_str());
+#endif
+    fprintf(stderr, "image-size = %d x %d\n", width, height);
+    fprintf(stderr, "steps = %d\n", steps);
+    fprintf(stderr, "seed = %d\n", seed);
+    fprintf(stderr, "gpu-id = %d\n", gpuid);
+
+    const bool use_gpu = gpuid >= 0;
+    const bool use_bf16 = gpuid >= 0;
 
     // tokenizer
     std::vector<int> input_ids;
@@ -177,7 +406,13 @@ int main()
         bpe.AddAdditionalSpecialToken("<|im_start|>");
         bpe.AddAdditionalSpecialToken("<|im_end|>");
 
-        std::string message = std::string("<|im_start|>user\n") + prompt + std::string("<|im_end|>\n<|im_start|>assistant\n");
+#if _WIN32
+        std::string prompt_utf8 = wstring_to_utf8_string(prompt);
+#else
+        std::string prompt_utf8 = prompt;
+#endif
+
+        std::string message = std::string("<|im_start|>user\n") + prompt_utf8 + std::string("<|im_end|>\n<|im_start|>assistant\n");
 
         input_ids = bpe.encode(message, false, false);
     }
@@ -637,13 +872,13 @@ int main()
 
         vae_out.to_pixels((unsigned char*)bgr.data, ncnn::Mat::PIXEL_RGB2BGR);
 
-        wic_encode_image(L"out.png", bgr.w, bgr.h, bgr.elempack, bgr.data);
+        wic_encode_image(output_path.c_str(), bgr.w, bgr.h, bgr.elempack, bgr.data);
 #else
         ncnn::Mat rgb(width, height, (size_t)3u, 3);
 
         vae_out.to_pixels((unsigned char*)rgb.data, ncnn::Mat::PIXEL_RGB);
 
-        png_save("out.png", rgb.w, rgb.h, rgb.elempack, (const unsigned char*)rgb.data);
+        png_save(output_path.c_str(), rgb.w, rgb.h, rgb.elempack, (const unsigned char*)rgb.data);
 #endif
     }
 
