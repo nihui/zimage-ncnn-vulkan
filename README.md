@@ -29,7 +29,7 @@ https://huggingface.co/nihui-szyl/z-image-ncnn/tree/main/z-image
 ### Example Command
 
 ```shell
-zimage-ncnn-vulkan.exe -p "" -o output.png
+zimage-ncnn-vulkan.exe -p "風的彷徨." -o output.png
 ```
 
 ### Full Usages
