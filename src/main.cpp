@@ -1,10 +1,12 @@
 // z-image implemented with ncnn library
 
-#include <stdio.h>
-#include <string.h>
 #include <float.h>
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 #include <random>
 
@@ -385,7 +387,7 @@ int main(int argc, char** argv)
 #else
     fprintf(stderr, "prompt = %s\n", prompt.c_str());
     fprintf(stderr, "negative-prompt = %s\n", negative_prompt.c_str());
-    fprintf(stderr, "output-path = %ls\n", output_path.c_str());
+    fprintf(stderr, "output-path = %s\n", output_path.c_str());
 #endif
     fprintf(stderr, "image-size = %d x %d\n", width, height);
     fprintf(stderr, "steps = %d\n", steps);
