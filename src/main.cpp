@@ -254,9 +254,15 @@ int main(int argc, char** argv)
 {
     srand(time(NULL));
 
-    path_t prompt = path_t("A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.");
+#if _WIN32
+    path_t prompt = L"A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.";
     path_t negative_prompt;
-    path_t output_path = path_t("out.png");
+    path_t output_path = L"out.png";
+#else
+    path_t prompt = "A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.";
+    path_t negative_prompt;
+    path_t output_path = "out.png";
+#endif
     int width = 1024;
     int height = 1024;
     int steps = 9;
