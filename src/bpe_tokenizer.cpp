@@ -4,8 +4,6 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-#include <cctype>
-#include <stdexcept>
 
 // ---------------- I/O helpers ----------------
 static std::string Trim(const std::string& s) {
@@ -248,8 +246,8 @@ const std::vector<std::string>& BpeTokenizer::BpeForPieceCached(const std::strin
     auto tokens = BpeForPiece(piece);
     {
         std::lock_guard<std::mutex> g(cache_mu_);
-        auto [it, _] = bpe_cache_.emplace(piece, std::move(tokens));
-        return it->second;
+        auto result = bpe_cache_.emplace(piece, std::move(tokens));
+        return result.first->second;
     }
 }
 
@@ -324,7 +322,10 @@ BpeTokenizer::BpeTokenizer(BpeTokenizer&& other) noexcept
 BpeTokenizer& BpeTokenizer::operator=(BpeTokenizer&& other) noexcept {
     if (this != &other) {
         // 同时锁两边，避免数据竞争
-        std::scoped_lock lk(cache_mu_, other.cache_mu_);
+        std::lock(cache_mu_, other.cache_mu_);
+        std::lock_guard<std::mutex> lock1(cache_mu_, std::adopt_lock);
+        std::lock_guard<std::mutex> lock2(other.cache_mu_, std::adopt_lock);
+
         id_to_token_ = std::move(other.id_to_token_);
         token_to_id_ = std::move(other.token_to_id_);
         merges_rank_ = std::move(other.merges_rank_);
@@ -371,9 +372,9 @@ BpeTokenizer BpeTokenizer::LoadFromFiles(const std::string& vocab_path,
 }
 
 void BpeTokenizer::EnsureSpecialTokens(const SpecialTokensConfig& spec, bool add_if_missing) {
-    auto ensure = [&](const std::optional<std::string>& name, int& id_slot) {
-        if (!name.has_value()) { id_slot = -1; return; }
-        auto it = token_to_id_.find(*name);
+    auto ensure = [&](const std::string& name, int& id_slot) {
+        if (name.empty()) { id_slot = -1; return; }
+        auto it = token_to_id_.find(name);
         if (it != token_to_id_.end()) {
             id_slot = it->second;
             return;
@@ -383,8 +384,8 @@ void BpeTokenizer::EnsureSpecialTokens(const SpecialTokensConfig& spec, bool add
             return;
         }
         id_slot = static_cast<int>(id_to_token_.size());
-        id_to_token_.push_back(*name);
-        token_to_id_.emplace(*name, id_slot);
+        id_to_token_.push_back(name);
+        token_to_id_.emplace(name, id_slot);
     };
 
     ensure(spec.bos_token, special_ids_.bos_id);

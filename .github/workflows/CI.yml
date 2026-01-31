@@ -1,0 +1,52 @@
+name: CI
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  UseMultiToolTask: true
+
+concurrency:
+  group: CI-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        submodules: 'recursive'
+    - name: build
+      run: |
+        mkdir build; cd build
+        cmake -A x64 ../src
+        cmake --build . --config Release -j 4
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        submodules: 'recursive'
+    - name: build
+      run: |
+        mkdir build && cd build
+        cmake ../src
+        cmake --build . -j $(nproc)
+
+  macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        submodules: 'recursive'
+    - name: build
+      run: |
+        mkdir build && cd build
+        cmake ../src
+        cmake --build . -j $(nproc)
