@@ -6,7 +6,6 @@ on:
     branches: [master]
 
 env:
-  DEVELOPER_DIR: /Applications/Xcode_15.2.app/Contents/Developer
   UseMultiToolTask: true
 
 concurrency:
@@ -36,9 +35,9 @@ jobs:
         submodules: 'recursive'
     - name: build
       run: |
-          mkdir build && cd build
-          cmake ../src
-          cmake --build . -j $(nproc)
+        mkdir build && cd build
+        cmake ../src
+        cmake --build . -j $(nproc)
 
   macos:
     runs-on: macos-latest
@@ -48,6 +47,6 @@ jobs:
         submodules: 'recursive'
     - name: build
       run: |
-          mkdir build && cd build
-          cmake ../src
-          cmake --build . -j $(nproc)
+        mkdir build && cd build
+        cmake ../src
+        cmake --build . -j $(nproc)

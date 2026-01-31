@@ -5,22 +5,19 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
-#include <optional>
 #include <cstdint>
-#include <functional>
-#include <utility>
 #include <limits>
 #include <mutex>
 #include <map>
 
 struct SpecialTokensConfig {
-    std::optional<std::string> bos_token;
-    std::optional<std::string> eos_token;
-    std::optional<std::string> unk_token;
-    std::optional<std::string> sep_token;
-    std::optional<std::string> pad_token;
-    std::optional<std::string> cls_token;
-    std::optional<std::string> mask_token;
+    std::string bos_token;
+    std::string eos_token;
+    std::string unk_token;
+    std::string sep_token;
+    std::string pad_token;
+    std::string cls_token;
+    std::string mask_token;
 };
 
 struct SpecialTokenIds {

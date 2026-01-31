@@ -4,8 +4,6 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-#include <cctype>
-#include <stdexcept>
 
 // ---------------- I/O helpers ----------------
 static std::string Trim(const std::string& s) {
@@ -371,9 +369,9 @@ BpeTokenizer BpeTokenizer::LoadFromFiles(const std::string& vocab_path,
 }
 
 void BpeTokenizer::EnsureSpecialTokens(const SpecialTokensConfig& spec, bool add_if_missing) {
-    auto ensure = [&](const std::optional<std::string>& name, int& id_slot) {
-        if (!name.has_value()) { id_slot = -1; return; }
-        auto it = token_to_id_.find(*name);
+    auto ensure = [&](const std::string& name, int& id_slot) {
+        if (name.empty()) { id_slot = -1; return; }
+        auto it = token_to_id_.find(name);
         if (it != token_to_id_.end()) {
             id_slot = it->second;
             return;
@@ -383,8 +381,8 @@ void BpeTokenizer::EnsureSpecialTokens(const SpecialTokensConfig& spec, bool add
             return;
         }
         id_slot = static_cast<int>(id_to_token_.size());
-        id_to_token_.push_back(*name);
-        token_to_id_.emplace(*name, id_slot);
+        id_to_token_.push_back(name);
+        token_to_id_.emplace(name, id_slot);
     };
 
     ensure(spec.bos_token, special_ids_.bos_id);
