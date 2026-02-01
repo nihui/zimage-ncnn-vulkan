@@ -32,7 +32,7 @@ void generate_latent(int width, int height, int seed, ncnn::Mat& latent)
     }
 }
 
-void rope_embbedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin)
+void rope_embedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin)
 {
     // 确保预计算已完成
     const float theta = 256.0f;
@@ -145,7 +145,7 @@ void generate_x_freqs(int num_patches_w, int num_patches_h, int cap_len, ncnn::M
         }
     }
 
-    rope_embbedder(x_pos_ids, x_cos, x_sin);
+    rope_embedder(x_pos_ids, x_cos, x_sin);
 }
 
 void generate_cap_freqs(int cap_len, ncnn::Mat& cap_cos, ncnn::Mat& cap_sin)
@@ -159,7 +159,7 @@ void generate_cap_freqs(int cap_len, ncnn::Mat& cap_cos, ncnn::Mat& cap_sin)
         p[2] = 0;
     }
 
-    ZImage::rope_embbedder(cap_pos_ids, cap_cos, cap_sin);
+    rope_embedder(cap_pos_ids, cap_cos, cap_sin);
 }
 
 void concat_along_h(const ncnn::Mat& a, const ncnn::Mat& b, ncnn::Mat& out)
