@@ -2,7 +2,35 @@
 
 #include "zimage.h"
 
+#if _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
+
+#include <random>
+
 namespace ZImage {
+
+void generate_latent(int width, int height, int seed, ncnn::Mat& latent)
+{
+    const int latents_width = width / 8;
+    const int latents_height = height / 8;
+
+    latent.create(latents_width, latents_height, 16);
+
+    std::mt19937 gen(seed);
+
+    float mean = 0.f;
+    float stddev = 1.f;
+    std::normal_distribution<float> dist(mean, stddev);
+
+    for (int i = 0; i < latent.total(); i++)
+    {
+        latent[i] = dist(gen);
+    }
+}
 
 void rope_embbedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin)
 {
@@ -98,6 +126,40 @@ void rope_embbedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin
             current_offset += half_dim;
         }
     }
+}
+
+void generate_x_freqs(int num_patches_w, int num_patches_h, int cap_len, ncnn::Mat& x_cos, ncnn::Mat& x_sin)
+{
+    const int num_patches = num_patches_w * num_patches_h;
+    const int start_t = cap_len + 1;
+
+    ncnn::Mat x_pos_ids(3, num_patches);
+    for (int py = 0; py < num_patches_h; py++)
+    {
+        for (int px = 0; px < num_patches_w; px++)
+        {
+            int* p = x_pos_ids.row<int>(py * num_patches_w + px);
+            p[0] = start_t;
+            p[1] = py;
+            p[2] = px;
+        }
+    }
+
+    rope_embbedder(x_pos_ids, x_cos, x_sin);
+}
+
+void generate_cap_freqs(int cap_len, ncnn::Mat& cap_cos, ncnn::Mat& cap_sin)
+{
+    ncnn::Mat cap_pos_ids(3, cap_len);
+    for (int i = 0; i < cap_len; i++)
+    {
+        int* p = cap_pos_ids.row<int>(i);
+        p[0] = 1 + i;
+        p[1] = 0;
+        p[2] = 0;
+    }
+
+    ZImage::rope_embbedder(cap_pos_ids, cap_cos, cap_sin);
 }
 
 void concat_along_h(const ncnn::Mat& a, const ncnn::Mat& b, ncnn::Mat& out)
@@ -207,6 +269,24 @@ Tokenizer::Tokenizer() : bpe(BpeTokenizer::LoadFromFiles("vocab.txt", "merges.tx
     bpe.AddAdditionalSpecialToken("<|im_start|>");
     bpe.AddAdditionalSpecialToken("<|im_end|>");
 }
+
+#if _WIN32
+static std::string wstring_to_utf8_string(const std::wstring& wstr)
+{
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), NULL, 0, NULL, NULL);
+    std::string result(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), &result[0], size_needed, NULL, NULL);
+    return result;
+}
+
+static std::wstring utf8_string_to_wstring(const std::string& str)
+{
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), NULL, 0);
+    std::wstring result(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &result[0], size_needed);
+    return result;
+}
+#endif
 
 int Tokenizer::encode(const path_t& prompt, std::vector<int>& ids) const
 {

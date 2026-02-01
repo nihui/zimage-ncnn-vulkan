@@ -17,7 +17,13 @@
 
 namespace ZImage {
 
+void generate_latent(int width, int height, int seed, ncnn::Mat& latent);
+
 void rope_embbedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin);
+
+void generate_x_freqs(int num_patches_w, int num_patches_h, int cap_len, ncnn::Mat& x_cos, ncnn::Mat& x_sin);
+
+void generate_cap_freqs(int cap_len, ncnn::Mat& cap_cos, ncnn::Mat& cap_sin);
 
 void concat_along_h(const ncnn::Mat& a, const ncnn::Mat& b, ncnn::Mat& out);
 

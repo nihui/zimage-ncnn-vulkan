@@ -8,7 +8,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <random>
+#include <vector>
 
 #if _WIN32
 // image encoder with wic
@@ -65,22 +65,6 @@ static std::vector<int> parse_optarg_int_array(const wchar_t* optarg)
 
     return array;
 }
-
-static std::string wstring_to_utf8_string(const std::wstring& wstr)
-{
-    int size_needed = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), NULL, 0, NULL, NULL);
-    std::string result(size_needed, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), &result[0], size_needed, NULL, NULL);
-    return result;
-}
-
-static std::wstring utf8_string_to_wstring(const std::string& str)
-{
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), NULL, 0);
-    std::wstring result(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &result[0], size_needed);
-    return result;
-}
 #else // _WIN32
 #include <unistd.h> // getopt()
 
@@ -136,6 +120,7 @@ int main(int argc, char** argv)
     int width = 1024;
     int height = 1024;
     int steps = 9;
+    float guidance_scale = 1.f; // FIXME hardcode
     int seed = rand();
     int gpuid = ncnn::get_default_gpu_index();
 
@@ -262,117 +247,103 @@ int main(int argc, char** argv)
     fprintf(stderr, "seed = %d\n", seed);
     fprintf(stderr, "gpu-id = %d\n", gpuid);
 
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
+    const bool has_negative_prompt = !negative_prompt.empty();
 
     // tokenizer
     std::vector<int> input_ids;
+    std::vector<int> neg_input_ids;
     {
         ZImage::Tokenizer tokenizer;
 
         tokenizer.encode(prompt, input_ids);
+
+        if (has_negative_prompt)
+        {
+            tokenizer.encode(negative_prompt, neg_input_ids);
+        }
     }
 
     // text encoder
     ncnn::Mat cap;
+    ncnn::Mat neg_cap;
     {
         ZImage::TextEncoder text_encoder;
 
         text_encoder.load(gpuid);
 
         text_encoder.process(input_ids, cap);
+
+        if (has_negative_prompt)
+        {
+            text_encoder.process(neg_input_ids, neg_cap);
+        }
     }
 
     // prepare latent
     ncnn::Mat latent;
-    {
-        const int latents_width = width / 8;
-        const int latents_height = height / 8;
+    ZImage::generate_latent(width, height, seed, latent);
 
-        latent.create(latents_width, latents_height, 16);
+    const int patch_size = 2;
+    const int num_patches_w = latent.w / patch_size;
+    const int num_patches_h = latent.h / patch_size;
 
-        std::mt19937 gen(seed);
-
-        float mean = 0.f;
-        float stddev = 1.f;
-        std::normal_distribution<float> dist(mean, stddev);
-
-        for (int i = 0; i < latent.total(); i++)
-        {
-            latent[i] = dist(gen);
-        }
-    }
+    fprintf(stderr, "num_patches = %d x %d\n", num_patches_w, num_patches_h);
 
     ncnn::Mat x_cos;
     ncnn::Mat x_sin;
-    {
-        const int patch_size = 2;
-
-        const int num_patches_w = latent.w / patch_size;
-        const int num_patches_h = latent.h / patch_size;
-        const int num_patches = num_patches_w * num_patches_h;
-
-        fprintf(stderr, "num_patches = %d x %d\n", num_patches_w, num_patches_h);
-
-        const int cap_len = cap.h;
-        const int start_t = cap_len + 1;
-
-        ncnn::Mat x_pos_ids(3, num_patches);
-        for (int py = 0; py < num_patches_h; py++)
-        {
-            for (int px = 0; px < num_patches_w; px++)
-            {
-                int* p = x_pos_ids.row<int>(py * num_patches_w + px);
-                p[0] = start_t;
-                p[1] = py;
-                p[2] = px;
-            }
-        }
-
-        ZImage::rope_embbedder(x_pos_ids, x_cos, x_sin);
-    }
-
     ncnn::Mat cap_cos;
     ncnn::Mat cap_sin;
-    {
-        const int cap_len = cap.h;
-
-        ncnn::Mat cap_pos_ids(3, cap_len);
-        for (int i = 0; i < cap_len; i++)
-        {
-            int* p = cap_pos_ids.row<int>(i);
-            p[0] = 1 + i;
-            p[1] = 0;
-            p[2] = 0;
-        }
-
-        ZImage::rope_embbedder(cap_pos_ids, cap_cos, cap_sin);
-    }
-
-    // concat along seqlen
     ncnn::Mat unified_cos;
     ncnn::Mat unified_sin;
+    ZImage::generate_x_freqs(num_patches_w, num_patches_h, cap.h, x_cos, x_sin);
+    ZImage::generate_cap_freqs(cap.h, cap_cos, cap_sin);
     ZImage::concat_along_h(x_cos, cap_cos, unified_cos);
     ZImage::concat_along_h(x_sin, cap_sin, unified_sin);
 
+    ncnn::Mat neg_x_cos;
+    ncnn::Mat neg_x_sin;
+    ncnn::Mat neg_cap_cos;
+    ncnn::Mat neg_cap_sin;
+    ncnn::Mat neg_unified_cos;
+    ncnn::Mat neg_unified_sin;
+    if (has_negative_prompt)
+    {
+        ZImage::generate_x_freqs(num_patches_w, num_patches_h, neg_cap.h, neg_x_cos, neg_x_sin);
+        ZImage::generate_cap_freqs(neg_cap.h, neg_cap_cos, neg_cap_sin);
+        ZImage::concat_along_h(neg_x_cos, neg_cap_cos, neg_unified_cos);
+        ZImage::concat_along_h(neg_x_sin, neg_cap_sin, neg_unified_sin);
+    }
+
     // cap_embedder
     ncnn::Mat cap_embed;
+    ncnn::Mat neg_cap_embed;
     {
         ZImage::CapEmbedder cap_embedder;
 
         cap_embedder.load(gpuid);
 
         cap_embedder.process(cap, cap_embed);
+
+        if (has_negative_prompt)
+        {
+            cap_embedder.process(neg_cap, neg_cap_embed);
+        }
     }
 
     // context_refiner
     ncnn::Mat cap_refine;
+    ncnn::Mat neg_cap_refine;
     {
         ZImage::ContextRefiner context_refiner;
 
         context_refiner.load(gpuid);
 
         context_refiner.process(cap_embed, cap_cos, cap_sin, cap_refine);
+
+        if (has_negative_prompt)
+        {
+            context_refiner.process(neg_cap_embed, neg_cap_cos, neg_cap_sin, neg_cap_refine);
+        }
     }
 
     // patchify
@@ -428,13 +399,44 @@ int main(int argc, char** argv)
             ncnn::Mat unified_embed;
             ZImage::concat_along_h(x_embed_refine, cap_refine, unified_embed);
 
+            ncnn::Mat neg_unified_embed;
+            if (has_negative_prompt)
+            {
+                ZImage::concat_along_h(x_embed_refine, neg_cap_refine, neg_unified_embed);
+            }
+
             // unified
             ncnn::Mat unified;
             unified_refiner.process(unified_embed, unified_cos, unified_sin, t_embed, unified);
 
+            ncnn::Mat neg_unified;
+            if (has_negative_prompt)
+            {
+                unified_refiner.process(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified);
+            }
+
             // all_final_layer
             ncnn::Mat unified_final;
             all_final_layer.process(unified, t_embed, unified_final);
+
+            ncnn::Mat neg_unified_final;
+            if (has_negative_prompt)
+            {
+                all_final_layer.process(neg_unified, t_embed, neg_unified_final);
+            }
+
+            if (has_negative_prompt)
+            {
+                // apply cfg
+                const int total = unified_final.total();
+                for (int i = 0; i < total; i++)
+                {
+                    float pos = unified_final[i];
+                    float neg = neg_unified_final[i];
+
+                    unified_final[i] = pos + guidance_scale * (pos - neg);
+                }
+            }
 
             // euler scheduler step
             {
