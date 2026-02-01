@@ -1,6 +1,7 @@
 // z-image implemented with ncnn library
 
 #include <float.h>
+#include <locale.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -120,7 +121,7 @@ int main(int argc, char** argv)
     int width = 1024;
     int height = 1024;
     int steps = 9;
-    float guidance_scale = 1.f; // FIXME hardcode
+    float guidance_scale = 4.f; // FIXME hardcode
     int seed = rand();
     int gpuid = ncnn::get_default_gpu_index();
 
