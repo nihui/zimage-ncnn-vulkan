@@ -14,9 +14,11 @@
 // image encoder with wic
 #include "wic_image.h"
 #else // _WIN32
-// image encoder with libpng
+// image encoder with libjpeg and libpng
+#include "jpeg_image.h"
 #include "png_image.h"
 #endif // _WIN32
+#include "webp_image.h"
 
 #if _WIN32
 #include <wchar.h>
@@ -256,15 +258,9 @@ int main(int argc, char** argv)
 {
     srand(time(NULL));
 
-#if _WIN32
-    path_t prompt = L"A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.";
+    path_t prompt = PATHSTR("A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.");
     path_t negative_prompt;
-    path_t output_path = L"out.png";
-#else
-    path_t prompt = "A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.";
-    path_t negative_prompt;
-    path_t output_path = "out.png";
-#endif
+    path_t outpath = PATHSTR("out.png");
     int width = 1024;
     int height = 1024;
     int steps = 9;
@@ -285,7 +281,7 @@ int main(int argc, char** argv)
             negative_prompt = optarg;
             break;
         case L'o':
-            output_path = optarg;
+            outpath = optarg;
             break;
         case L's':
         {
@@ -327,7 +323,7 @@ int main(int argc, char** argv)
             negative_prompt = optarg;
             break;
         case 'o':
-            output_path = optarg;
+            outpath = optarg;
             break;
         case 's':
         {
@@ -358,7 +354,7 @@ int main(int argc, char** argv)
     }
 #endif // _WIN32
 
-    if (prompt.empty() || output_path.empty())
+    if (prompt.empty() || outpath.empty())
     {
         print_usage();
         return -1;
@@ -383,11 +379,11 @@ int main(int argc, char** argv)
 #if _WIN32
     fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());
     fwprintf(stderr, L"negative-prompt = %ls\n", negative_prompt.c_str());
-    fwprintf(stderr, L"output-path = %ls\n", output_path.c_str());
+    fwprintf(stderr, L"output-path = %ls\n", outpath.c_str());
 #else
     fprintf(stderr, "prompt = %s\n", prompt.c_str());
     fprintf(stderr, "negative-prompt = %s\n", negative_prompt.c_str());
-    fprintf(stderr, "output-path = %s\n", output_path.c_str());
+    fprintf(stderr, "output-path = %s\n", outpath.c_str());
 #endif
     fprintf(stderr, "image-size = %d x %d\n", width, height);
     fprintf(stderr, "steps = %d\n", steps);
@@ -867,19 +863,46 @@ int main(int argc, char** argv)
         const float norm_vals[3] = {127.5f, 127.5f, 127.5f};
         vae_out.substract_mean_normalize(mean_vals, norm_vals);
 
+        ncnn::Mat outimage(width, height, (size_t)3u, 3);
 #if _WIN32
-        ncnn::Mat bgr(width, height, (size_t)3u, 3);
-
-        vae_out.to_pixels((unsigned char*)bgr.data, ncnn::Mat::PIXEL_RGB2BGR);
-
-        wic_encode_image(output_path.c_str(), bgr.w, bgr.h, bgr.elempack, bgr.data);
+        vae_out.to_pixels((unsigned char*)outimage.data, ncnn::Mat::PIXEL_RGB2BGR);
 #else
-        ncnn::Mat rgb(width, height, (size_t)3u, 3);
-
-        vae_out.to_pixels((unsigned char*)rgb.data, ncnn::Mat::PIXEL_RGB);
-
-        png_save(output_path.c_str(), rgb.w, rgb.h, rgb.elempack, (const unsigned char*)rgb.data);
+        vae_out.to_pixels((unsigned char*)outimage.data, ncnn::Mat::PIXEL_RGB);
 #endif
+
+        int success = 0;
+
+        path_t ext = get_file_extension(outpath);
+
+        if (ext == PATHSTR("webp") || ext == PATHSTR("WEBP"))
+        {
+            success = webp_save(outpath.c_str(), outimage.w, outimage.h, outimage.elempack, (const unsigned char*)outimage.data);
+        }
+        else if (ext == PATHSTR("png") || ext == PATHSTR("PNG"))
+        {
+#if _WIN32
+            success = wic_encode_image(outpath.c_str(), outimage.w, outimage.h, outimage.elempack, outimage.data);
+#else
+            success = png_save(outpath.c_str(), outimage.w, outimage.h, outimage.elempack, (const unsigned char*)outimage.data);
+#endif
+        }
+        else if (ext == PATHSTR("jpg") || ext == PATHSTR("JPG") || ext == PATHSTR("jpeg") || ext == PATHSTR("JPEG"))
+        {
+#if _WIN32
+            success = wic_encode_jpeg_image(outpath.c_str(), outimage.w, outimage.h, outimage.elempack, outimage.data);
+#else
+            success = jpeg_save(outpath.c_str(), outimage.w, outimage.h, outimage.elempack, (const unsigned char*)outimage.data);
+#endif
+        }
+
+        if (!success)
+        {
+#if _WIN32
+            fwprintf(stderr, L"encode image %ls failed\n", outpath.c_str());
+#else
+            fprintf(stderr, "encode image %s failed\n", outpath.c_str());
+#endif
+        }
     }
 
     return 0;
