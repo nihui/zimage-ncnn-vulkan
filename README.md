@@ -78,33 +78,50 @@ cmake --build . -j 4
 <tr>
 <td width="50%">
 
+<details>
+<summary>expand for full command</summary>
+
 ```zimage-ncnn-vulkan.exe -p "A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer." -r 2065820720```
+
+</details>
 
 ![zimage](images/2065820720.jpg)
 
 </td>
 <td width="50%">
 
+<details>
+<summary>expand for full command</summary>
+
 ```zimage-ncnn-vulkan.exe -p "A Suzhou garden at night under a bright autumn moon, silvery light bathing the pavilions and rocks, paper lanterns glowing warmly along the corridors, the pond reflecting the moon and lantern light, cool color palette with accents of warmth, mysterious and poetic atmosphere." -r 1593388185```
+
+</details>
 
 ![zimage](images/1593388185.jpg)
 
 </td>
 </tr>
-</table>
-
-<table width="100%">
 <tr>
 <td width="50%">
 
+<details>
+<summary>expand for full command</summary>
+
 ```zimage-ncnn-vulkan.exe -p "Cinnamoroll, Sanrio character, white puppy with long floppy ears, blue eyes, chubby cheeks, plump tail like a cinnamon roll, simple blue bow on right ear, high-quality anime figure, prize figure style, seamless joints, glossy paint finish, detailed sculpting, sitting pose with head tilted, innocent expression, standing on a fluffy cloud-shaped display base, soft gradient pastel background, studio lighting, product photography, sharp focus, shallow depth of field" -r 1362178531```
+
+</details>
 
 ![zimage](images/1362178531.jpg)
 
 </td>
 <td width="50%">
 
+<details>
+<summary>expand for full command</summary>
+
 ```zimage-ncnn-vulkan.exe -p "a cute girl taking a mirror selfie, full-body view in a full-length mirror, holding a large smartphone in front of her face, the phone screen is visible and glowing, slightly obscuring her eyes or lower face, long twin tails, soft makeup, blush, wearing a trendy and cute outfit, in a cozy, clean bedroom with soft lighting, mirror may have a decorative frame, shallow depth of field, digital photo style, cinematic lighting, sharp focus on the phone and reflection, natural skin texture, Instagram aesthetic, candid feeling" -r 2029158043```
+
+</details>
 
 ![zimage](images/2029158043.jpg)
 
@@ -114,35 +131,53 @@ cmake --build . -j 4
 
 <table width="100%">
 <tr>
-<td width="30%">
+<td width="33%">
+
+<details>
+<summary>expand for full command</summary>
 
 ```zimage-ncnn-vulkan.exe -p "風的彷徨." -r 77```
+
+</details>
 
 ![zimage](images/77.jpg)
 
 </td>
-<td width="30%">
+<td width="33%">
+
+<details>
+<summary>expand for full command</summary>
 
 ```zimage-ncnn-vulkan.exe -p "風的彷徨." -r 777```
+
+</details>
 
 ![zimage](images/777.jpg)
 
 </td>
-<td width="40%">
+<td width="34%">
+
+<details>
+<summary>expand for full command</summary>
 
 ```zimage-ncnn-vulkan.exe -p "Anya Forger hugging a large white dog (Bond), both looking happy, in a park, sunny day, grass field, action shot, from Spy x Family" -r 499008670```
+
+</details>
 
 ![zimage](images/499008670.jpg)
 
 </td>
 </tr>
-</table>
 
-<table width="100%">
 <tr>
-<td width="100%">
+<td width="100%" colspan=3>
+
+<details>
+<summary>expand for full command</summary>
 
 ```zimage-ncnn-vulkan.exe -p "traditional Chinese handscroll painting in the style of “清明上河图”, horizontal panorama, bustling riverside cityscape in Northern Song Dynasty, Bianliang city, with Rainbow Bridge at the center, boats on the river, shops along the street, teahouses, inns, hundreds of diverse people engaged in daily activities, travelers, merchants, scholars, entertainers, children playing, ink and color on silk, fine brushwork for architecture and figures, subtle expressive brushwork for trees and landscape, soft natural colors, high aerial viewpoint, continuous narrative, lively, prosperous, detailed, harmonious, capturing a complete day of city life, extremely wide aspect ratio, vanishing perspective, Chinese seals and calligraphy on the margins, slight aged paper texture" -r 1321390901 -s 2048,512```
+
+</details>
 
 ![zimage](images/1321390901.jpg)
 
