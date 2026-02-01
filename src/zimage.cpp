@@ -170,10 +170,8 @@ void concat_along_h(const ncnn::Mat& a, const ncnn::Mat& b, ncnn::Mat& out)
     memcpy(out.row(a.h), b, w * b.h * sizeof(float));
 }
 
-void prepare_timestamps(int steps, std::vector<float>& sigmas, std::vector<float>& timesteps)
+void prepare_timestamps(int steps, float shift, std::vector<float>& sigmas, std::vector<float>& timesteps)
 {
-    const float shift = 3.f;
-
     sigmas.resize(steps + 1);
     timesteps.resize(steps);
     for (int i = 0; i < steps; i++)

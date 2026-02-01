@@ -354,7 +354,9 @@ int main(int argc, char** argv)
     // prepare timesteps
     std::vector<float> sigmas;
     std::vector<float> timesteps;
-    ZImage::prepare_timestamps(steps, sigmas, timesteps);
+    const float shift = 3.f; // z-image-turbo
+    // const float shift = 6.f; // z-image
+    ZImage::prepare_timestamps(steps, shift, sigmas, timesteps);
 
     // t_embedder
     ncnn::Mat t_embeds;

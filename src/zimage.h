@@ -27,7 +27,7 @@ void generate_cap_freqs(int cap_len, ncnn::Mat& cap_cos, ncnn::Mat& cap_sin);
 
 void concat_along_h(const ncnn::Mat& a, const ncnn::Mat& b, ncnn::Mat& out);
 
-void prepare_timestamps(int steps, std::vector<float>& sigmas, std::vector<float>& timesteps);
+void prepare_timestamps(int steps, float shift, std::vector<float>& sigmas, std::vector<float>& timesteps);
 
 void patchify(const ncnn::Mat& latent, ncnn::Mat& x);
 
