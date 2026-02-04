@@ -301,18 +301,9 @@ int Tokenizer::encode(const path_t& prompt, std::vector<int>& ids) const
     return 0;
 }
 
-int TextEncoder::load(int gpuid)
+int TextEncoder::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    text_encoder.opt.vulkan_device_index = gpuid;
-    text_encoder.opt.use_vulkan_compute = use_gpu;
-    text_encoder.opt.use_fp16_packed = false;
-    text_encoder.opt.use_fp16_storage = false;
-    text_encoder.opt.use_fp16_arithmetic = false;
-    text_encoder.opt.use_bf16_packed = use_bf16;
-    text_encoder.opt.use_bf16_storage = use_bf16;
+    text_encoder.opt = opt;
     text_encoder.load_param("z_image_turbo_text_encoder.ncnn.param");
     text_encoder.load_model("z_image_turbo_text_encoder.ncnn.bin");
 
@@ -385,18 +376,9 @@ int TextEncoder::process(const std::vector<int>& input_ids, ncnn::Mat& cap)
     return 0;
 }
 
-int CapEmbedder::load(int gpuid)
+int CapEmbedder::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    cap_embedder.opt.vulkan_device_index = gpuid;
-    cap_embedder.opt.use_vulkan_compute = use_gpu;
-    cap_embedder.opt.use_fp16_packed = false;
-    cap_embedder.opt.use_fp16_storage = false;
-    cap_embedder.opt.use_fp16_arithmetic = false;
-    cap_embedder.opt.use_bf16_packed = use_bf16;
-    cap_embedder.opt.use_bf16_storage = use_bf16;
+    cap_embedder.opt = opt;
     cap_embedder.load_param("z_image_turbo_transformer_cap_embedder.ncnn.param");
     cap_embedder.load_model("z_image_turbo_transformer_cap_embedder.ncnn.bin");
 
@@ -414,18 +396,9 @@ int CapEmbedder::process(const ncnn::Mat& cap, ncnn::Mat& cap_embed)
     return 0;
 }
 
-int ContextRefiner::load(int gpuid)
+int ContextRefiner::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    context_refiner.opt.vulkan_device_index = gpuid;
-    context_refiner.opt.use_vulkan_compute = use_gpu;
-    context_refiner.opt.use_fp16_packed = false;
-    context_refiner.opt.use_fp16_storage = false;
-    context_refiner.opt.use_fp16_arithmetic = false;
-    context_refiner.opt.use_bf16_packed = use_bf16;
-    context_refiner.opt.use_bf16_storage = use_bf16;
+    context_refiner.opt = opt;
     context_refiner.load_param("z_image_turbo_transformer_context_refiner.ncnn.param");
     context_refiner.load_model("z_image_turbo_transformer_context_refiner.ncnn.bin");
 
@@ -445,18 +418,9 @@ int ContextRefiner::process(const ncnn::Mat& cap_embed, const ncnn::Mat& cap_cos
     return 0;
 }
 
-int TEmbedder::load(int gpuid)
+int TEmbedder::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    t_embedder.opt.vulkan_device_index = gpuid;
-    t_embedder.opt.use_vulkan_compute = use_gpu;
-    t_embedder.opt.use_fp16_packed = false;
-    t_embedder.opt.use_fp16_storage = false;
-    t_embedder.opt.use_fp16_arithmetic = false;
-    t_embedder.opt.use_bf16_packed = use_bf16;
-    t_embedder.opt.use_bf16_storage = use_bf16;
+    t_embedder.opt = opt;
     t_embedder.load_param("z_image_turbo_transformer_t_embedder.ncnn.param");
     t_embedder.load_model("z_image_turbo_transformer_t_embedder.ncnn.bin");
 
@@ -484,18 +448,9 @@ int TEmbedder::process(const std::vector<float>& timesteps, ncnn::Mat& t_embeds)
     return 0;
 }
 
-int AllXEmbedder::load(int gpuid)
+int AllXEmbedder::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    all_x_embedder.opt.vulkan_device_index = gpuid;
-    all_x_embedder.opt.use_vulkan_compute = use_gpu;
-    all_x_embedder.opt.use_fp16_packed = false;
-    all_x_embedder.opt.use_fp16_storage = false;
-    all_x_embedder.opt.use_fp16_arithmetic = false;
-    all_x_embedder.opt.use_bf16_packed = use_bf16;
-    all_x_embedder.opt.use_bf16_storage = use_bf16;
+    all_x_embedder.opt = opt;
     all_x_embedder.load_param("z_image_turbo_transformer_all_x_embedder.ncnn.param");
     all_x_embedder.load_model("z_image_turbo_transformer_all_x_embedder.ncnn.bin");
 
@@ -513,18 +468,9 @@ int AllXEmbedder::process(const ncnn::Mat& x, ncnn::Mat& x_embed)
     return 0;
 }
 
-int NoiseRefiner::load(int gpuid)
+int NoiseRefiner::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    noise_refiner.opt.vulkan_device_index = gpuid;
-    noise_refiner.opt.use_vulkan_compute = use_gpu;
-    noise_refiner.opt.use_fp16_packed = false;
-    noise_refiner.opt.use_fp16_storage = false;
-    noise_refiner.opt.use_fp16_arithmetic = false;
-    noise_refiner.opt.use_bf16_packed = use_bf16;
-    noise_refiner.opt.use_bf16_storage = use_bf16;
+    noise_refiner.opt = opt;
     noise_refiner.load_param("z_image_turbo_transformer_noise_refiner.ncnn.param");
     noise_refiner.load_model("z_image_turbo_transformer_noise_refiner.ncnn.bin");
 
@@ -545,18 +491,9 @@ int NoiseRefiner::process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, cons
     return 0;
 }
 
-int UnifiedRefiner::load(int gpuid)
+int UnifiedRefiner::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    unified_refiner.opt.vulkan_device_index = gpuid;
-    unified_refiner.opt.use_vulkan_compute = use_gpu;
-    unified_refiner.opt.use_fp16_packed = false;
-    unified_refiner.opt.use_fp16_storage = false;
-    unified_refiner.opt.use_fp16_arithmetic = false;
-    unified_refiner.opt.use_bf16_packed = use_bf16;
-    unified_refiner.opt.use_bf16_storage = use_bf16;
+    unified_refiner.opt = opt;
     unified_refiner.load_param("z_image_turbo_transformer_unified.ncnn.param");
     unified_refiner.load_model("z_image_turbo_transformer_unified.ncnn.bin");
 
@@ -577,18 +514,9 @@ int UnifiedRefiner::process(const ncnn::Mat& unified_embed, const ncnn::Mat& uni
     return 0;
 }
 
-int AllFinalLayer::load(int gpuid)
+int AllFinalLayer::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    all_final_layer.opt.vulkan_device_index = gpuid;
-    all_final_layer.opt.use_vulkan_compute = use_gpu;
-    all_final_layer.opt.use_fp16_packed = false;
-    all_final_layer.opt.use_fp16_storage = false;
-    all_final_layer.opt.use_fp16_arithmetic = false;
-    all_final_layer.opt.use_bf16_packed = use_bf16;
-    all_final_layer.opt.use_bf16_storage = use_bf16;
+    all_final_layer.opt = opt;
     all_final_layer.load_param("z_image_turbo_transformer_all_final_layer.ncnn.param");
     all_final_layer.load_model("z_image_turbo_transformer_all_final_layer.ncnn.bin");
 
@@ -607,18 +535,9 @@ int AllFinalLayer::process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, n
     return 0;
 }
 
-int VAE::load(int gpuid)
+int VAE::load(const ncnn::Option& opt)
 {
-    const bool use_gpu = gpuid >= 0;
-    const bool use_bf16 = gpuid >= 0;
-
-    vae.opt.vulkan_device_index = gpuid;
-    vae.opt.use_vulkan_compute = use_gpu;
-    vae.opt.use_fp16_packed = false;
-    vae.opt.use_fp16_storage = false;
-    vae.opt.use_fp16_arithmetic = false;
-    vae.opt.use_bf16_packed = use_bf16;
-    vae.opt.use_bf16_storage = use_bf16;
+    vae.opt = opt;
     vae.load_param("z_image_turbo_vae.ncnn.param");
     vae.load_model("z_image_turbo_vae.ncnn.bin");
 
