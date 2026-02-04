@@ -122,96 +122,101 @@ int main(int argc, char** argv)
     int height = 1024;
     int steps = 9;
     float guidance_scale = 0.f; // z-image-turbo
-    // float guidance_scale = 4.f; // z-image FIXME hardcode
+    float scheduler_shift = 3.f; // z-image-turbo
+    // float guidance_scale = 1.f; // z-image
+    // float scheduler_shift = 6.f; // z-image
     int seed = rand();
     int gpuid = ncnn::get_default_gpu_index();
 
+    // parse cli args
+    {
 #if _WIN32
-    setlocale(LC_ALL, "");
-    wchar_t opt;
-    while ((opt = getopt(argc, argv, L"p:n:o:s:l:r:g:h")) != (wchar_t)-1)
-    {
-        switch (opt)
+        setlocale(LC_ALL, "");
+        wchar_t opt;
+        while ((opt = getopt(argc, argv, L"p:n:o:s:l:r:g:h")) != (wchar_t)-1)
         {
-        case L'p':
-            prompt = optarg;
-            break;
-        case L'n':
-            negative_prompt = optarg;
-            break;
-        case L'o':
-            outpath = optarg;
-            break;
-        case L's':
-        {
-            std::vector<int> list = parse_optarg_int_array(optarg);
-            if (list.size() != 2)
+            switch (opt)
             {
+            case L'p':
+                prompt = optarg;
+                break;
+            case L'n':
+                negative_prompt = optarg;
+                break;
+            case L'o':
+                outpath = optarg;
+                break;
+            case L's':
+            {
+                std::vector<int> list = parse_optarg_int_array(optarg);
+                if (list.size() != 2)
+                {
+                    print_usage();
+                    return -1;
+                }
+                width = list[0];
+                height = list[1];
+                break;
+            }
+            case L'l':
+                steps = _wtoi(optarg);
+                break;
+            case L'r':
+                seed = _wtoi(optarg);
+                break;
+            case L'g':
+                gpuid = _wtoi(optarg);
+                break;
+            case L'h':
+            default:
                 print_usage();
                 return -1;
             }
-            width = list[0];
-            height = list[1];
-            break;
         }
-        case L'l':
-            steps = _wtoi(optarg);
-            break;
-        case L'r':
-            seed = _wtoi(optarg);
-            break;
-        case L'g':
-            gpuid = _wtoi(optarg);
-            break;
-        case L'h':
-        default:
-            print_usage();
-            return -1;
-        }
-    }
 #else // _WIN32
-    int opt;
-    while ((opt = getopt(argc, argv, "p:n:o:s:l:r:g:h")) != -1)
-    {
-        switch (opt)
+        int opt;
+        while ((opt = getopt(argc, argv, "p:n:o:s:l:r:g:h")) != -1)
         {
-        case 'p':
-            prompt = optarg;
-            break;
-        case 'n':
-            negative_prompt = optarg;
-            break;
-        case 'o':
-            outpath = optarg;
-            break;
-        case 's':
-        {
-            std::vector<int> list = parse_optarg_int_array(optarg);
-            if (list.size() != 2)
+            switch (opt)
             {
+            case 'p':
+                prompt = optarg;
+                break;
+            case 'n':
+                negative_prompt = optarg;
+                break;
+            case 'o':
+                outpath = optarg;
+                break;
+            case 's':
+            {
+                std::vector<int> list = parse_optarg_int_array(optarg);
+                if (list.size() != 2)
+                {
+                    print_usage();
+                    return -1;
+                }
+                width = list[0];
+                height = list[1];
+                break;
+            }
+            case 'l':
+                steps = atoi(optarg);
+                break;
+            case 'r':
+                seed = atoi(optarg);
+                break;
+            case 'g':
+                gpuid = atoi(optarg);
+                break;
+            case 'h':
+            default:
                 print_usage();
                 return -1;
             }
-            width = list[0];
-            height = list[1];
-            break;
         }
-        case 'l':
-            steps = atoi(optarg);
-            break;
-        case 'r':
-            seed = atoi(optarg);
-            break;
-        case 'g':
-            gpuid = atoi(optarg);
-            break;
-        case 'h':
-        default:
-            print_usage();
-            return -1;
-        }
-    }
 #endif // _WIN32
+    }
 
     if (prompt.empty() || outpath.empty())
     {
@@ -251,6 +256,21 @@ int main(int argc, char** argv)
 
     const bool apply_cfg = guidance_scale > 0.f;
 
+    ncnn::Option opt;
+    opt.use_vulkan_compute = gpuid >= 0;
+    opt.use_fp16_packed = false;
+    opt.use_fp16_storage = false;
+    opt.use_fp16_arithmetic = false;
+    opt.use_bf16_packed = gpuid >= 0;
+    opt.use_bf16_storage = gpuid >= 0;
+
+    uint32_t heap_budget = gpuid >= 0 ? ncnn::get_gpu_device(gpuid)->get_heap_budget() : 0;
+    if (heap_budget < 14000)
+    {
+        // enable the magic option for low vram graphics  :P
+        opt.use_weights_in_host_memory = true;
+    }
+
     // tokenizer
     std::vector<int> input_ids;
     std::vector<int> neg_input_ids;
@@ -271,7 +291,7 @@ int main(int argc, char** argv)
     {
         ZImage::TextEncoder text_encoder;
 
-        text_encoder.load(gpuid);
+        text_encoder.load(opt);
 
         text_encoder.process(input_ids, cap);
 
@@ -322,7 +342,7 @@ int main(int argc, char** argv)
     {
         ZImage::CapEmbedder cap_embedder;
 
-        cap_embedder.load(gpuid);
+        cap_embedder.load(opt);
 
         cap_embedder.process(cap, cap_embed);
 
@@ -338,7 +358,7 @@ int main(int argc, char** argv)
     {
         ZImage::ContextRefiner context_refiner;
 
-        context_refiner.load(gpuid);
+        context_refiner.load(opt);
 
         context_refiner.process(cap_embed, cap_cos, cap_sin, cap_refine);
 
@@ -355,16 +375,14 @@ int main(int argc, char** argv)
     // prepare timesteps
     std::vector<float> sigmas;
     std::vector<float> timesteps;
-    const float shift = 3.f; // z-image-turbo
-    // const float shift = 6.f; // z-image
-    ZImage::prepare_timestamps(steps, shift, sigmas, timesteps);
+    ZImage::prepare_timestamps(steps, scheduler_shift, sigmas, timesteps);
 
     // t_embedder
     ncnn::Mat t_embeds;
     {
         ZImage::TEmbedder t_embedder;
 
-        t_embedder.load(gpuid);
+        t_embedder.load(opt);
 
         t_embedder.process(timesteps, t_embeds);
     }
@@ -373,19 +391,19 @@ int main(int argc, char** argv)
     {
         ZImage::AllXEmbedder all_x_embedder;
 
-        all_x_embedder.load(gpuid);
+        all_x_embedder.load(opt);
 
         ZImage::NoiseRefiner noise_refiner;
 
-        noise_refiner.load(gpuid);
+        noise_refiner.load(opt);
 
         ZImage::UnifiedRefiner unified_refiner;
 
-        unified_refiner.load(gpuid);
+        unified_refiner.load(opt);
 
         ZImage::AllFinalLayer all_final_layer;
 
-        all_final_layer.load(gpuid);
+        all_final_layer.load(opt);
 
         for (int z = 0; z < steps; z++)
         {
@@ -463,6 +481,12 @@ int main(int argc, char** argv)
     // vae decode
     ncnn::Mat vae_out;
     {
+        if (heap_budget < 8000)
+        {
+            // use cpu until we implement tiled vae for low vram graphics  :(
+            opt.use_vulkan_compute = false;
+        }
+
         const float vae_scaling_factor = 0.3611f;
         const float vae_shift_factor = 0.1159f;
 
@@ -473,7 +497,7 @@ int main(int argc, char** argv)
 
         ZImage::VAE vae;
 
-        vae.load(gpuid);
+        vae.load(opt);
 
         vae.process(latent, vae_out);
     }

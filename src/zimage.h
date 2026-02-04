@@ -47,7 +47,7 @@ private:
 class TextEncoder
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const std::vector<int>& input_ids, ncnn::Mat& cap);
 
@@ -58,7 +58,7 @@ private:
 class CapEmbedder
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const ncnn::Mat& cap, ncnn::Mat& cap_embed);
 
@@ -69,7 +69,7 @@ private:
 class ContextRefiner
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const ncnn::Mat& cap_embed, const ncnn::Mat& cap_cos, const ncnn::Mat& cap_sin, ncnn::Mat& cap_refine);
 
@@ -80,7 +80,7 @@ private:
 class TEmbedder
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const std::vector<float>& timesteps, ncnn::Mat& t_embeds);
 
@@ -91,7 +91,7 @@ private:
 class AllXEmbedder
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const ncnn::Mat& x, ncnn::Mat& x_embed);
 
@@ -102,7 +102,7 @@ private:
 class NoiseRefiner
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, const ncnn::Mat& x_sin, const ncnn::Mat& t_embed, ncnn::Mat& x_embed_refine);
 
@@ -113,7 +113,7 @@ private:
 class UnifiedRefiner
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const ncnn::Mat& unified_embed, const ncnn::Mat& unified_cos, const ncnn::Mat& unified_sin, const ncnn::Mat& t_embed, ncnn::Mat& unified);
 
@@ -124,7 +124,7 @@ private:
 class AllFinalLayer
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, ncnn::Mat& unified_final);
 
@@ -135,7 +135,7 @@ private:
 class VAE
 {
 public:
-    int load(int gpuid);
+    int load(const ncnn::Option& opt);
 
     int process(const ncnn::Mat& latent, ncnn::Mat& vae_out);
 
