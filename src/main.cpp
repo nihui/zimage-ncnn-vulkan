@@ -257,6 +257,7 @@ int main(int argc, char** argv)
     const bool apply_cfg = guidance_scale > 0.f;
 
     ncnn::Option opt;
+    opt.vulkan_device_index = gpuid;
     opt.use_vulkan_compute = gpuid >= 0;
     opt.use_fp16_packed = false;
     opt.use_fp16_storage = false;
