@@ -121,7 +121,8 @@ int main(int argc, char** argv)
     int width = 1024;
     int height = 1024;
     int steps = 9;
-    float guidance_scale = 4.f; // FIXME hardcode
+    float guidance_scale = 0.f; // z-image-turbo
+    // float guidance_scale = 4.f; // z-image FIXME hardcode
     int seed = rand();
     int gpuid = ncnn::get_default_gpu_index();
 
@@ -248,7 +249,7 @@ int main(int argc, char** argv)
     fprintf(stderr, "seed = %d\n", seed);
     fprintf(stderr, "gpu-id = %d\n", gpuid);
 
-    const bool has_negative_prompt = !negative_prompt.empty();
+    const bool apply_cfg = guidance_scale > 0.f;
 
     // tokenizer
     std::vector<int> input_ids;
@@ -258,7 +259,7 @@ int main(int argc, char** argv)
 
         tokenizer.encode(prompt, input_ids);
 
-        if (has_negative_prompt)
+        if (apply_cfg)
         {
             tokenizer.encode(negative_prompt, neg_input_ids);
         }
@@ -274,7 +275,7 @@ int main(int argc, char** argv)
 
         text_encoder.process(input_ids, cap);
 
-        if (has_negative_prompt)
+        if (apply_cfg)
         {
             text_encoder.process(neg_input_ids, neg_cap);
         }
@@ -307,7 +308,7 @@ int main(int argc, char** argv)
     ncnn::Mat neg_cap_sin;
     ncnn::Mat neg_unified_cos;
     ncnn::Mat neg_unified_sin;
-    if (has_negative_prompt)
+    if (apply_cfg)
     {
         ZImage::generate_x_freqs(num_patches_w, num_patches_h, neg_cap.h, neg_x_cos, neg_x_sin);
         ZImage::generate_cap_freqs(neg_cap.h, neg_cap_cos, neg_cap_sin);
@@ -325,7 +326,7 @@ int main(int argc, char** argv)
 
         cap_embedder.process(cap, cap_embed);
 
-        if (has_negative_prompt)
+        if (apply_cfg)
         {
             cap_embedder.process(neg_cap, neg_cap_embed);
         }
@@ -341,7 +342,7 @@ int main(int argc, char** argv)
 
         context_refiner.process(cap_embed, cap_cos, cap_sin, cap_refine);
 
-        if (has_negative_prompt)
+        if (apply_cfg)
         {
             context_refiner.process(neg_cap_embed, neg_cap_cos, neg_cap_sin, neg_cap_refine);
         }
@@ -403,7 +404,7 @@ int main(int argc, char** argv)
             ZImage::concat_along_h(x_embed_refine, cap_refine, unified_embed);
 
             ncnn::Mat neg_unified_embed;
-            if (has_negative_prompt)
+            if (apply_cfg)
             {
                 ZImage::concat_along_h(x_embed_refine, neg_cap_refine, neg_unified_embed);
             }
@@ -413,7 +414,7 @@ int main(int argc, char** argv)
             unified_refiner.process(unified_embed, unified_cos, unified_sin, t_embed, unified);
 
             ncnn::Mat neg_unified;
-            if (has_negative_prompt)
+            if (apply_cfg)
             {
                 unified_refiner.process(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified);
             }
@@ -423,15 +424,15 @@ int main(int argc, char** argv)
             all_final_layer.process(unified, t_embed, unified_final);
 
             ncnn::Mat neg_unified_final;
-            if (has_negative_prompt)
+            if (apply_cfg)
             {
                 all_final_layer.process(neg_unified, t_embed, neg_unified_final);
             }
 
-            if (has_negative_prompt)
+            if (apply_cfg)
             {
                 // apply cfg
-                const int total = unified_final.total();
+                const int total = x.total();
                 for (int i = 0; i < total; i++)
                 {
                     float pos = unified_final[i];
