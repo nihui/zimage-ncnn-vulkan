@@ -127,6 +127,7 @@ int main(int argc, char** argv)
     // float scheduler_shift = 6.f; // z-image
     int seed = rand();
     int gpuid = ncnn::get_default_gpu_index();
+    int vae_tile_size = 512;
 
     // parse cli args
     {
@@ -266,7 +267,7 @@ int main(int argc, char** argv)
     opt.use_bf16_storage = gpuid >= 0;
 
     uint32_t heap_budget = gpuid >= 0 ? ncnn::get_gpu_device(gpuid)->get_heap_budget() : 0;
-    if (heap_budget < 14000)
+    // if (heap_budget < 14000)
     {
         // enable the magic option for low vram graphics  :P
         opt.use_weights_in_host_memory = true;
@@ -480,16 +481,8 @@ int main(int argc, char** argv)
     ZImage::unpatchify(x, latent);
 
     // vae decode
-    ncnn::Mat vae_out;
+    ncnn::Mat outimage;
     {
-        if (heap_budget < 8000)
-        {
-            // use cpu until we implement tiled vae for low vram graphics  :(
-            opt.use_vulkan_compute = false;
-            opt.use_bf16_packed = false;
-            opt.use_bf16_storage = false;
-        }
-
         const float vae_scaling_factor = 0.3611f;
         const float vae_shift_factor = 0.1159f;
 
@@ -498,27 +491,30 @@ int main(int argc, char** argv)
             latent[i] = latent[i] / vae_scaling_factor + vae_shift_factor;
         }
 
+        // if (vae_tile_size == 0 && heap_budget < 8000)
+        // {
+        //     // use cpu until we implement tiled vae for low vram graphics  :(
+        //     opt.use_vulkan_compute = false;
+        //     opt.use_bf16_packed = false;
+        //     opt.use_bf16_storage = false;
+        // }
+
         ZImage::VAE vae;
 
         vae.load(opt);
 
-        vae.process(latent, vae_out);
+        if (vae_tile_size)
+        {
+            vae.process_tiled(latent, vae_tile_size, outimage);
+        }
+        else
+        {
+            vae.process(latent, outimage);
+        }
     }
 
     // save image
     {
-        // -1 ~ 1 to 0 ~ 255
-        const float mean_vals[3] = {-1.f, -1.f, -1.f};
-        const float norm_vals[3] = {127.5f, 127.5f, 127.5f};
-        vae_out.substract_mean_normalize(mean_vals, norm_vals);
-
-        ncnn::Mat outimage(width, height, (size_t)3u, 3);
-#if _WIN32
-        vae_out.to_pixels((unsigned char*)outimage.data, ncnn::Mat::PIXEL_RGB2BGR);
-#else
-        vae_out.to_pixels((unsigned char*)outimage.data, ncnn::Mat::PIXEL_RGB);
-#endif
-
         int success = 0;
 
         path_t ext = get_file_extension(outpath);

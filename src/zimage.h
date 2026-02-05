@@ -137,7 +137,9 @@ class VAE
 public:
     int load(const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& latent, ncnn::Mat& vae_out);
+    int process(const ncnn::Mat& latent, ncnn::Mat& outimage);
+
+    int process_tiled(const ncnn::Mat& latent, int tile_size, ncnn::Mat& outimage);
 
 private:
     ncnn::Net vae;
