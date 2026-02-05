@@ -486,6 +486,8 @@ int main(int argc, char** argv)
         {
             // use cpu until we implement tiled vae for low vram graphics  :(
             opt.use_vulkan_compute = false;
+            opt.use_bf16_packed = false;
+            opt.use_bf16_storage = false;
         }
 
         const float vae_scaling_factor = 0.3611f;
