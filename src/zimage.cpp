@@ -544,10 +544,10 @@ int AllFinalLayer::process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, n
 // 0 = inference
 // 1 = inference and collect mean and var
 // 2 = inference with collected mean and var
-static int g_vae_tiled_groupnorm_state = 0;
-static std::vector< std::vector<float> > g_means;
-static std::vector< std::vector<float> > g_vars;
-static int g_groupnorm_count = 0;
+static thread_local int g_vae_tiled_groupnorm_state = 0;
+static thread_local std::vector< std::vector<float> > g_means;
+static thread_local std::vector< std::vector<float> > g_vars;
+static thread_local int g_groupnorm_count = 0;
 
 class VAETiledGroupNorm : public ncnn::Layer
 {
