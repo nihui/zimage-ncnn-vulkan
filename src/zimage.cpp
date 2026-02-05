@@ -822,7 +822,7 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_size, ncnn::Mat& outima
 {
     const int latent_tile_size = tile_size / 8;
 
-    if (latent_tile_size > std::max(latent.w, latent.h))
+    if (latent_tile_size >= std::max(latent.w, latent.h))
     {
         return process(latent, outimage);
     }
