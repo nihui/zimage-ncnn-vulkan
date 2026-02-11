@@ -102,8 +102,9 @@ static void print_usage()
     fprintf(stdout, "  -n negative-prompt   negative prompt (optional)\n");
     fprintf(stdout, "  -o output-path       output image path (default=out.png)\n");
     fprintf(stdout, "  -s image-size        image resolution (default=1024,1024)\n");
-    fprintf(stdout, "  -l steps             denoise steps (default=9)\n");
+    fprintf(stdout, "  -l steps             denoise steps (default=auto)\n");
     fprintf(stdout, "  -r random-seed       random seed (default=rand)\n");
+    fprintf(stdout, "  -m model-path        z-image model path (default=z-image-turbo)\n");
     fprintf(stdout, "  -g gpu-id            gpu device to use (-1=cpu, default=auto)\n");
 }
 
@@ -120,12 +121,9 @@ int main(int argc, char** argv)
     path_t outpath = PATHSTR("out.png");
     int width = 1024;
     int height = 1024;
-    int steps = 9;
-    float guidance_scale = 0.f; // z-image-turbo
-    float scheduler_shift = 3.f; // z-image-turbo
-    // float guidance_scale = 1.f; // z-image
-    // float scheduler_shift = 6.f; // z-image
+    int steps = -1;
     int seed = rand();
+    path_t model = PATHSTR("z-image-turbo");
     int gpuid = ncnn::get_default_gpu_index();
 
     // parse cli args
@@ -133,7 +131,7 @@ int main(int argc, char** argv)
 #if _WIN32
         setlocale(LC_ALL, "");
         wchar_t opt;
-        while ((opt = getopt(argc, argv, L"p:n:o:s:l:r:g:h")) != (wchar_t)-1)
+        while ((opt = getopt(argc, argv, L"p:n:o:s:l:r:m:g:h")) != (wchar_t)-1)
         {
             switch (opt)
             {
@@ -164,6 +162,9 @@ int main(int argc, char** argv)
             case L'r':
                 seed = _wtoi(optarg);
                 break;
+            case L'm':
+                model = optarg;
+                break;
             case L'g':
                 gpuid = _wtoi(optarg);
                 break;
@@ -175,7 +176,7 @@ int main(int argc, char** argv)
         }
 #else // _WIN32
         int opt;
-        while ((opt = getopt(argc, argv, "p:n:o:s:l:r:g:h")) != -1)
+        while ((opt = getopt(argc, argv, "p:n:o:s:l:r:m:g:h")) != -1)
         {
             switch (opt)
             {
@@ -205,6 +206,9 @@ int main(int argc, char** argv)
                 break;
             case 'r':
                 seed = atoi(optarg);
+                break;
+            case 'm':
+                model = optarg;
                 break;
             case 'g':
                 gpuid = atoi(optarg);
@@ -240,14 +244,38 @@ int main(int argc, char** argv)
         return -1;
     }
 
+    float guidance_scale;
+    float scheduler_shift;
+    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
+    {
+        guidance_scale = 0.f;
+        scheduler_shift = 3.f;
+        if (steps == -1)
+            steps = 9;
+    }
+    else if (model.find(PATHSTR("z-image")) != path_t::npos)
+    {
+        guidance_scale = 1.f;
+        scheduler_shift = 6.f;
+        if (steps == -1)
+            steps = 50;
+    }
+    else
+    {
+        fprintf(stderr, "unknown model dir type\n");
+        return -1;
+    }
+
 #if _WIN32
     fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());
     fwprintf(stderr, L"negative-prompt = %ls\n", negative_prompt.c_str());
     fwprintf(stderr, L"output-path = %ls\n", outpath.c_str());
+    fwprintf(stderr, L"model = %ls\n", model.c_str());
 #else
     fprintf(stderr, "prompt = %s\n", prompt.c_str());
     fprintf(stderr, "negative-prompt = %s\n", negative_prompt.c_str());
     fprintf(stderr, "output-path = %s\n", outpath.c_str());
+    fprintf(stderr, "model = %s\n", model.c_str());
 #endif
     fprintf(stderr, "image-size = %d x %d\n", width, height);
     fprintf(stderr, "steps = %d\n", steps);
@@ -290,7 +318,7 @@ int main(int argc, char** argv)
     std::vector<int> input_ids;
     std::vector<int> neg_input_ids;
     {
-        ZImage::Tokenizer tokenizer;
+        ZImage::Tokenizer tokenizer(model);
 
         tokenizer.encode(prompt, input_ids);
 
@@ -306,7 +334,7 @@ int main(int argc, char** argv)
     {
         ZImage::TextEncoder text_encoder;
 
-        text_encoder.load(opt);
+        text_encoder.load(model, opt);
 
         text_encoder.process(input_ids, cap);
 
@@ -357,7 +385,7 @@ int main(int argc, char** argv)
     {
         ZImage::CapEmbedder cap_embedder;
 
-        cap_embedder.load(opt);
+        cap_embedder.load(model, opt);
 
         cap_embedder.process(cap, cap_embed);
 
@@ -373,7 +401,7 @@ int main(int argc, char** argv)
     {
         ZImage::ContextRefiner context_refiner;
 
-        context_refiner.load(opt);
+        context_refiner.load(model, opt);
 
         context_refiner.process(cap_embed, cap_cos, cap_sin, cap_refine);
 
@@ -397,7 +425,7 @@ int main(int argc, char** argv)
     {
         ZImage::TEmbedder t_embedder;
 
-        t_embedder.load(opt);
+        t_embedder.load(model, opt);
 
         t_embedder.process(timesteps, t_embeds);
     }
@@ -406,19 +434,19 @@ int main(int argc, char** argv)
     {
         ZImage::AllXEmbedder all_x_embedder;
 
-        all_x_embedder.load(opt);
+        all_x_embedder.load(model, opt);
 
         ZImage::NoiseRefiner noise_refiner;
 
-        noise_refiner.load(opt);
+        noise_refiner.load(model, opt);
 
         ZImage::UnifiedRefiner unified_refiner;
 
-        unified_refiner.load(opt);
+        unified_refiner.load(model, opt);
 
         ZImage::AllFinalLayer all_final_layer;
 
-        all_final_layer.load(opt);
+        all_final_layer.load(model, opt);
 
         for (int z = 0; z < steps; z++)
         {
@@ -504,11 +532,13 @@ int main(int argc, char** argv)
             latent[i] = latent[i] / vae_scaling_factor + vae_shift_factor;
         }
 
+        const bool use_vae_tiled = vae_tile_width < width || vae_tile_height < height;
+
         ZImage::VAE vae;
 
-        vae.load(opt);
+        vae.load(model, use_vae_tiled, opt);
 
-        if (vae_tile_width < width || vae_tile_height < height)
+        if (use_vae_tiled)
         {
             vae.process_tiled(latent, vae_tile_width, vae_tile_height, outimage);
         }

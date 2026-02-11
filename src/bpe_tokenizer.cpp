@@ -29,6 +29,24 @@ std::vector<std::string> BpeTokenizer::LoadVocab(const std::string& vocab_path) 
     return vocab;
 }
 
+#if _WIN32
+std::vector<std::string> BpeTokenizer::LoadVocab(const std::wstring& vocab_path) {
+    std::ifstream ifs(vocab_path);
+    if (!ifs.is_open()) {
+        // throw std::runtime_error("Failed to open vocab file: " + vocab_path);
+        fwprintf(stderr, L"Failed to open vocab file: %ls\n", vocab_path.c_str());
+    }
+    std::vector<std::string> vocab;
+    vocab.reserve(50000);
+    std::string line;
+    while (std::getline(ifs, line)) {
+        line = Trim(line);
+        if (!line.empty()) vocab.push_back(line);
+    }
+    return vocab;
+}
+#endif
+
 std::unordered_map<std::string, int> BpeTokenizer::BuildTokenToId(const std::vector<std::string>& id_to_token) {
     std::unordered_map<std::string, int> m;
     m.reserve(id_to_token.size() * 2);
@@ -58,6 +76,29 @@ std::unordered_map<std::string, int> BpeTokenizer::LoadMergesRank(const std::str
     }
     return merges;
 }
+
+#if _WIN32
+std::unordered_map<std::string, int> BpeTokenizer::LoadMergesRank(const std::wstring& merges_path) {
+    std::ifstream ifs(merges_path);
+    if (!ifs.is_open()) {
+        // throw std::runtime_error("Failed to open merges file: " + merges_path);
+        fwprintf(stderr, L"Failed to open merges file: %ls\n", merges_path.c_str());
+    }
+    std::unordered_map<std::string, int> merges;
+    merges.reserve(50000);
+    std::string line;
+    int rank = 0;
+    while (std::getline(ifs, line)) {
+        line = Trim(line);
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream iss(line);
+        std::string a, b;
+        if (!(iss >> a >> b)) continue;
+        merges.emplace(PairKey(a, b), rank++);
+    }
+    return merges;
+}
+#endif
 
 // ---------------- UTF-8 utilities ----------------
 
@@ -370,6 +411,34 @@ BpeTokenizer BpeTokenizer::LoadFromFiles(const std::string& vocab_path,
     // 显式移动，避免 MSVC 尝试拷贝
     return std::move(tok);
 }
+
+#if _WIN32
+BpeTokenizer BpeTokenizer::LoadFromFiles(const std::wstring& vocab_path,
+                                         const std::wstring& merges_path,
+                                         const SpecialTokensConfig& spec,
+                                         bool add_special_if_missing,
+                                         bool fallback_to_chars,
+                                         bool use_byte_encoder) {
+    BpeTokenizer tok;
+    tok.id_to_token_ = LoadVocab(vocab_path);
+    if (tok.id_to_token_.empty()) {
+        // throw std::runtime_error("Vocab is empty: " + vocab_path);
+        fwprintf(stderr, L"Vocab is empty: %ls\n", vocab_path.c_str());
+    }
+    tok.token_to_id_ = BuildTokenToId(tok.id_to_token_);
+    tok.merges_rank_ = LoadMergesRank(merges_path);
+    tok.fallback_to_chars_ = fallback_to_chars;
+    tok.use_byte_encoder_ = use_byte_encoder;
+
+    if (tok.use_byte_encoder_) {
+        tok.InitByteMaps();
+    }
+
+    tok.EnsureSpecialTokens(spec, add_special_if_missing);
+    // 显式移动，避免 MSVC 尝试拷贝
+    return std::move(tok);
+}
+#endif
 
 void BpeTokenizer::EnsureSpecialTokens(const SpecialTokensConfig& spec, bool add_if_missing) {
     auto ensure = [&](const std::string& name, int& id_slot) {

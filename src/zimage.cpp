@@ -381,7 +381,10 @@ void get_optimal_tile_size(int width, int height, int max_tile_area, int* tile_w
     *tile_height = best_th;
 }
 
-Tokenizer::Tokenizer() : bpe(BpeTokenizer::LoadFromFiles("vocab.txt", "merges.txt", SpecialTokensConfig{}, false, true, true))
+Tokenizer::Tokenizer(const path_t& model) : bpe(BpeTokenizer::LoadFromFiles(
+    sanitize_filepath(model + PATHSTR("/../z-image-turbo/vocab.txt")),
+    sanitize_filepath(model + PATHSTR("/../z-image-turbo/merges.txt")),
+    SpecialTokensConfig{}, false, true, true))
 {
     bpe.AddAdditionalSpecialToken("<|endoftext|>");
     bpe.AddAdditionalSpecialToken("<|im_start|>");
@@ -421,11 +424,17 @@ int Tokenizer::encode(const path_t& prompt, std::vector<int>& ids) const
     return 0;
 }
 
-int TextEncoder::load(const ncnn::Option& opt)
+int TextEncoder::load(const path_t& model, const ncnn::Option& opt)
 {
+    // share the same text_encoder
+    path_t parampath = model + PATHSTR("/../z-image-turbo/z_image_turbo_text_encoder.ncnn.param");
+    path_t modelpath = model + PATHSTR("/../z-image-turbo/z_image_turbo_text_encoder.ncnn.bin");
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     text_encoder.opt = opt;
-    text_encoder.load_param("z_image_turbo_text_encoder.ncnn.param");
-    text_encoder.load_model("z_image_turbo_text_encoder.ncnn.bin");
+    text_encoder.load_param(parampath.c_str());
+    text_encoder.load_model(modelpath.c_str());
 
     return 0;
 }
@@ -496,11 +505,26 @@ int TextEncoder::process(const std::vector<int>& input_ids, ncnn::Mat& cap)
     return 0;
 }
 
-int CapEmbedder::load(const ncnn::Option& opt)
+int CapEmbedder::load(const path_t& model, const ncnn::Option& opt)
 {
+    path_t parampath;
+    path_t modelpath;
+    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_turbo_transformer_cap_embedder.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_turbo_transformer_cap_embedder.ncnn.bin");
+    }
+    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_transformer_cap_embedder.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_transformer_cap_embedder.ncnn.bin");
+    }
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     cap_embedder.opt = opt;
-    cap_embedder.load_param("z_image_turbo_transformer_cap_embedder.ncnn.param");
-    cap_embedder.load_model("z_image_turbo_transformer_cap_embedder.ncnn.bin");
+    cap_embedder.load_param(parampath.c_str());
+    cap_embedder.load_model(modelpath.c_str());
 
     return 0;
 }
@@ -516,11 +540,26 @@ int CapEmbedder::process(const ncnn::Mat& cap, ncnn::Mat& cap_embed)
     return 0;
 }
 
-int ContextRefiner::load(const ncnn::Option& opt)
+int ContextRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
+    path_t parampath;
+    path_t modelpath;
+    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_turbo_transformer_context_refiner.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_turbo_transformer_context_refiner.ncnn.bin");
+    }
+    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_transformer_context_refiner.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_transformer_context_refiner.ncnn.bin");
+    }
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     context_refiner.opt = opt;
-    context_refiner.load_param("z_image_turbo_transformer_context_refiner.ncnn.param");
-    context_refiner.load_model("z_image_turbo_transformer_context_refiner.ncnn.bin");
+    context_refiner.load_param(parampath.c_str());
+    context_refiner.load_model(modelpath.c_str());
 
     return 0;
 }
@@ -538,11 +577,26 @@ int ContextRefiner::process(const ncnn::Mat& cap_embed, const ncnn::Mat& cap_cos
     return 0;
 }
 
-int TEmbedder::load(const ncnn::Option& opt)
+int TEmbedder::load(const path_t& model, const ncnn::Option& opt)
 {
+    path_t parampath;
+    path_t modelpath;
+    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_turbo_transformer_t_embedder.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_turbo_transformer_t_embedder.ncnn.bin");
+    }
+    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_transformer_t_embedder.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_transformer_t_embedder.ncnn.bin");
+    }
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     t_embedder.opt = opt;
-    t_embedder.load_param("z_image_turbo_transformer_t_embedder.ncnn.param");
-    t_embedder.load_model("z_image_turbo_transformer_t_embedder.ncnn.bin");
+    t_embedder.load_param(parampath.c_str());
+    t_embedder.load_model(modelpath.c_str());
 
     return 0;
 }
@@ -568,11 +622,26 @@ int TEmbedder::process(const std::vector<float>& timesteps, ncnn::Mat& t_embeds)
     return 0;
 }
 
-int AllXEmbedder::load(const ncnn::Option& opt)
+int AllXEmbedder::load(const path_t& model, const ncnn::Option& opt)
 {
+    path_t parampath;
+    path_t modelpath;
+    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_turbo_transformer_all_x_embedder.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_turbo_transformer_all_x_embedder.ncnn.bin");
+    }
+    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_transformer_all_x_embedder.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_transformer_all_x_embedder.ncnn.bin");
+    }
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     all_x_embedder.opt = opt;
-    all_x_embedder.load_param("z_image_turbo_transformer_all_x_embedder.ncnn.param");
-    all_x_embedder.load_model("z_image_turbo_transformer_all_x_embedder.ncnn.bin");
+    all_x_embedder.load_param(parampath.c_str());
+    all_x_embedder.load_model(modelpath.c_str());
 
     return 0;
 }
@@ -588,11 +657,26 @@ int AllXEmbedder::process(const ncnn::Mat& x, ncnn::Mat& x_embed)
     return 0;
 }
 
-int NoiseRefiner::load(const ncnn::Option& opt)
+int NoiseRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
+    path_t parampath;
+    path_t modelpath;
+    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_turbo_transformer_noise_refiner.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_turbo_transformer_noise_refiner.ncnn.bin");
+    }
+    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_transformer_noise_refiner.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_transformer_noise_refiner.ncnn.bin");
+    }
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     noise_refiner.opt = opt;
-    noise_refiner.load_param("z_image_turbo_transformer_noise_refiner.ncnn.param");
-    noise_refiner.load_model("z_image_turbo_transformer_noise_refiner.ncnn.bin");
+    noise_refiner.load_param(parampath.c_str());
+    noise_refiner.load_model(modelpath.c_str());
 
     return 0;
 }
@@ -611,11 +695,26 @@ int NoiseRefiner::process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, cons
     return 0;
 }
 
-int UnifiedRefiner::load(const ncnn::Option& opt)
+int UnifiedRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
+    path_t parampath;
+    path_t modelpath;
+    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_turbo_transformer_unified.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_turbo_transformer_unified.ncnn.bin");
+    }
+    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_transformer_unified.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_transformer_unified.ncnn.bin");
+    }
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     unified_refiner.opt = opt;
-    unified_refiner.load_param("z_image_turbo_transformer_unified.ncnn.param");
-    unified_refiner.load_model("z_image_turbo_transformer_unified.ncnn.bin");
+    unified_refiner.load_param(parampath.c_str());
+    unified_refiner.load_model(modelpath.c_str());
 
     return 0;
 }
@@ -634,11 +733,26 @@ int UnifiedRefiner::process(const ncnn::Mat& unified_embed, const ncnn::Mat& uni
     return 0;
 }
 
-int AllFinalLayer::load(const ncnn::Option& opt)
+int AllFinalLayer::load(const path_t& model, const ncnn::Option& opt)
 {
+    path_t parampath;
+    path_t modelpath;
+    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_turbo_transformer_all_final_layer.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_turbo_transformer_all_final_layer.ncnn.bin");
+    }
+    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
+    {
+        parampath = model + PATHSTR("/z_image_transformer_all_final_layer.ncnn.param");
+        modelpath = model + PATHSTR("/z_image_transformer_all_final_layer.ncnn.bin");
+    }
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     all_final_layer.opt = opt;
-    all_final_layer.load_param("z_image_turbo_transformer_all_final_layer.ncnn.param");
-    all_final_layer.load_model("z_image_turbo_transformer_all_final_layer.ncnn.bin");
+    all_final_layer.load_param(parampath.c_str());
+    all_final_layer.load_model(modelpath.c_str());
 
     return 0;
 }
@@ -892,12 +1006,21 @@ int VAETiledGroupNorm::forward_inplace(ncnn::Mat& bottom_top_blob, const ncnn::O
     return 0;
 }
 
-int VAE::load(const ncnn::Option& opt)
+int VAE::load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt)
 {
+    // share the same vae
+    path_t parampath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae.ncnn.param");
+    path_t modelpath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae.ncnn.bin");
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
     vae.opt = opt;
-    vae.register_custom_layer("GroupNorm", VAETiledGroupNorm_layer_creator);
-    vae.load_param("z_image_turbo_vae.ncnn.param");
-    vae.load_model("z_image_turbo_vae.ncnn.bin");
+    if (use_vae_tiled)
+    {
+        vae.register_custom_layer("GroupNorm", VAETiledGroupNorm_layer_creator);
+    }
+    vae.load_param(parampath.c_str());
+    vae.load_model(modelpath.c_str());
 
     g_means.resize(g_groupnorm_count);
     g_vars.resize(g_groupnorm_count);
