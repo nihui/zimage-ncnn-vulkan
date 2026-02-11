@@ -31,7 +31,7 @@ std::vector<std::string> BpeTokenizer::LoadVocab(const std::string& vocab_path) 
 
 #if _WIN32
 std::vector<std::string> BpeTokenizer::LoadVocab(const std::wstring& vocab_path) {
-    std::wifstream ifs(vocab_path);
+    std::ifstream ifs(vocab_path);
     if (!ifs.is_open()) {
         // throw std::runtime_error("Failed to open vocab file: " + vocab_path);
         fwprintf(stderr, L"Failed to open vocab file: %ls\n", vocab_path.c_str());
@@ -79,7 +79,7 @@ std::unordered_map<std::string, int> BpeTokenizer::LoadMergesRank(const std::str
 
 #if _WIN32
 std::unordered_map<std::string, int> BpeTokenizer::LoadMergesRank(const std::wstring& merges_path) {
-    std::wifstream ifs(merges_path);
+    std::ifstream ifs(merges_path);
     if (!ifs.is_open()) {
         // throw std::runtime_error("Failed to open merges file: " + merges_path);
         fwprintf(stderr, L"Failed to open merges file: %ls\n", merges_path.c_str());
