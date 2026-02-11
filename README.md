@@ -16,8 +16,8 @@ https://github.com/Tongyi-MAI/Z-Image
 
 ### requirements
 
-- Minimum: 16GB RAM, 1GB Vulkan integrated GPU
-- Recommended: 32GB RAM, 16GB Vulkan dedicated GPU with tencorcore/matrix hardware
+- Minimum: 16GB RAM, any Vulkan integrated GPU
+- Recommended: 32GB RAM, 16GB dedicated GPU with tencorcore/matrix hardware
 
 ### prepare model files
 
