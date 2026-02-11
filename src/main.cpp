@@ -532,11 +532,13 @@ int main(int argc, char** argv)
             latent[i] = latent[i] / vae_scaling_factor + vae_shift_factor;
         }
 
+        const bool use_vae_tiled = vae_tile_width < width || vae_tile_height < height;
+
         ZImage::VAE vae;
 
-        vae.load(model, opt);
+        vae.load(model, use_vae_tiled, opt);
 
-        if (vae_tile_width < width || vae_tile_height < height)
+        if (use_vae_tiled)
         {
             vae.process_tiled(latent, vae_tile_width, vae_tile_height, outimage);
         }

@@ -137,7 +137,7 @@ private:
 class VAE
 {
 public:
-    int load(const path_t& model, const ncnn::Option& opt);
+    int load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt);
 
     int process(const ncnn::Mat& latent, ncnn::Mat& outimage);
 

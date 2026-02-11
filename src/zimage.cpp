@@ -1006,7 +1006,7 @@ int VAETiledGroupNorm::forward_inplace(ncnn::Mat& bottom_top_blob, const ncnn::O
     return 0;
 }
 
-int VAE::load(const path_t& model, const ncnn::Option& opt)
+int VAE::load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt)
 {
     // share the same vae
     path_t parampath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae.ncnn.param");
@@ -1015,7 +1015,10 @@ int VAE::load(const path_t& model, const ncnn::Option& opt)
     modelpath = sanitize_filepath(modelpath);
 
     vae.opt = opt;
-    vae.register_custom_layer("GroupNorm", VAETiledGroupNorm_layer_creator);
+    if (use_vae_tiled)
+    {
+        vae.register_custom_layer("GroupNorm", VAETiledGroupNorm_layer_creator);
+    }
     vae.load_param(parampath.c_str());
     vae.load_model(modelpath.c_str());
 
