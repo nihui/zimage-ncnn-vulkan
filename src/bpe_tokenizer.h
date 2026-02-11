@@ -38,6 +38,14 @@ public:
                                       bool add_special_if_missing = true,
                                       bool fallback_to_chars = true,
                                       bool use_byte_encoder = false);
+#if _WIN32
+    static BpeTokenizer LoadFromFiles(const std::wstring& vocab_path,
+                                      const std::wstring& merges_path,
+                                      const SpecialTokensConfig& spec,
+                                      bool add_special_if_missing = true,
+                                      bool fallback_to_chars = true,
+                                      bool use_byte_encoder = false);
+#endif
 
     std::vector<int> encode(const std::string& text,
                             bool add_bos = false,
@@ -74,8 +82,14 @@ private:
     BpeTokenizer() = default;
 
     static std::vector<std::string> LoadVocab(const std::string& vocab_path);
+#if _WIN32
+    static std::vector<std::string> LoadVocab(const std::wstring& vocab_path);
+#endif
     static std::unordered_map<std::string, int> BuildTokenToId(const std::vector<std::string>& id_to_token);
     static std::unordered_map<std::string, int> LoadMergesRank(const std::string& merges_path);
+#if _WIN32
+    static std::unordered_map<std::string, int> LoadMergesRank(const std::wstring& merges_path);
+#endif
     void EnsureSpecialTokens(const SpecialTokensConfig& spec, bool add_if_missing);
     static std::vector<std::string> PretokenizeSentencePiece(const std::string& text);
 
