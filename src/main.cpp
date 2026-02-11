@@ -102,7 +102,7 @@ static void print_usage()
     fprintf(stdout, "  -n negative-prompt   negative prompt (optional)\n");
     fprintf(stdout, "  -o output-path       output image path (default=out.png)\n");
     fprintf(stdout, "  -s image-size        image resolution (default=1024,1024)\n");
-    fprintf(stdout, "  -l steps             denoise steps (default=9)\n");
+    fprintf(stdout, "  -l steps             denoise steps (default=auto)\n");
     fprintf(stdout, "  -r random-seed       random seed (default=rand)\n");
     fprintf(stdout, "  -m model-path        z-image model path (default=z-image-turbo)\n");
     fprintf(stdout, "  -g gpu-id            gpu device to use (-1=cpu, default=auto)\n");
@@ -121,7 +121,7 @@ int main(int argc, char** argv)
     path_t outpath = PATHSTR("out.png");
     int width = 1024;
     int height = 1024;
-    int steps = 9;
+    int steps = -1;
     int seed = rand();
     path_t model = PATHSTR("z-image-turbo");
     int gpuid = ncnn::get_default_gpu_index();
@@ -250,11 +250,15 @@ int main(int argc, char** argv)
     {
         guidance_scale = 0.f;
         scheduler_shift = 3.f;
+        if (steps == -1)
+            steps = 9;
     }
     else if (model.find(PATHSTR("z-image")) != path_t::npos)
     {
         guidance_scale = 1.f;
         scheduler_shift = 6.f;
+        if (steps == -1)
+            steps = 50;
     }
     else
     {
