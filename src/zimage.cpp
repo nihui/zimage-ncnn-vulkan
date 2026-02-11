@@ -267,6 +267,120 @@ void unpatchify(const ncnn::Mat& x, ncnn::Mat& latent)
     }
 }
 
+// Compute optimal tile size for splitting an image of (width x height) into tiles.
+//
+// Constraints:
+//   - width and height are always multiples of 16.
+//   - tile_size_w and tile_size_h must be multiples of 16.
+//   - tile_size_w * tile_size_h <= max_tile_area_size.
+//   - The tile aspect ratio should be as close as possible to width:height.
+//   - The tiling should evenly divide the image to avoid very small leftover tiles.
+static int align_up_16(int val)
+{
+    return ((val + 15) / 16) * 16;
+}
+
+void get_optimal_tile_size(int width, int height, int max_tile_area, int* tile_width, int* tile_height)
+{
+    // If the whole image fits in one tile, just return the original size.
+    if ((long long)width * height <= max_tile_area)
+    {
+        *tile_width = width;
+        *tile_height = height;
+        return;
+    }
+
+    double input_ratio = (double)width / (double)height;
+    double best_score  = -1.0;
+    int    best_tw     = 16;
+    int    best_th     = 16;
+
+    // Enumerate the number of horizontal splits (nx) and vertical splits (ny).
+    // For each (nx, ny) pair, compute the candidate tile size, then score it.
+    //
+    // tile_w = ceil(width  / nx)  aligned up to 16
+    // tile_h = ceil(height / ny)  aligned up to 16
+    //
+    // Maximum possible nx = width/16, ny = height/16 (tile at least 16x16).
+    int max_nx = width  / 16;
+    int max_ny = height / 16;
+
+    for (int nx = 1; nx <= max_nx; nx++)
+    {
+        // Candidate tile width: distribute width into nx pieces, align up to 16.
+        int tw = align_up_16((width + nx - 1) / nx);
+        if (tw > width)
+            tw = width;
+        if (tw < 16)
+            tw = 16;
+
+        for (int ny = 1; ny <= max_ny; ny++)
+        {
+            int th = align_up_16((height + ny - 1) / ny);
+            if (th > height)
+                th = height;
+            if (th < 16)
+                th = 16;
+
+            // Area constraint.
+            if ((long long)tw * th > max_tile_area)
+                continue;
+
+            // --- Scoring ---
+            //
+            // 1. Aspect-ratio similarity (higher is better, max = 1.0):
+            //    ratio_score = min(r1/r2, r2/r1)  where r1 = tw/th, r2 = width/height
+            double tile_ratio  = (double)tw / (double)th;
+            double ratio_score = (tile_ratio < input_ratio)
+                                     ? tile_ratio / input_ratio
+                                     : input_ratio / tile_ratio;
+
+            // 2. Utilization: how well does the tiling cover the image without
+            //    creating tiny leftover strips?
+            //
+            //    actual_nx = ceil(width / tw),  actual_ny = ceil(height / th)
+            //    last_w = width  - (actual_nx - 1) * tw
+            //    last_h = height - (actual_ny - 1) * th
+            //
+            //    We want last_w / tw and last_h / th to be as close to 1 as
+            //    possible (perfect division), or at least not too small.
+            //    util = (last_w / tw) * (last_h / th)   range (0, 1]
+            int actual_nx = (width  + tw - 1) / tw;
+            int actual_ny = (height + th - 1) / th;
+            int last_w = width  - (actual_nx - 1) * tw;
+            int last_h = height - (actual_ny - 1) * th;
+            if (last_w <= 0)
+                last_w = tw;
+            if (last_h <= 0)
+                last_h = th;
+            double util_w = (double)last_w / (double)tw;
+            double util_h = (double)last_h / (double)th;
+            double util   = util_w * util_h;
+
+            // 3. Tile area efficiency: prefer larger tiles (fewer tiles total)
+            //    as long as they satisfy the constraints.
+            //    area_score = (tw * th) / max_tile_area   range (0, 1]
+            double area_score = (double)((long long)tw * th) / (double)max_tile_area;
+
+            // Combined score (weights chosen empirically):
+            //   - utilization is the most important (avoid tiny scraps)
+            //   - ratio preservation is second
+            //   - area efficiency is third (prefer fewer, bigger tiles)
+            double score = 0.45 * util + 0.35 * ratio_score + 0.20 * area_score;
+
+            if (score > best_score)
+            {
+                best_score = score;
+                best_tw = tw;
+                best_th = th;
+            }
+        }
+    }
+
+    *tile_width = best_tw;
+    *tile_height = best_th;
+}
+
 Tokenizer::Tokenizer() : bpe(BpeTokenizer::LoadFromFiles("vocab.txt", "merges.txt", SpecialTokensConfig{}, false, true, true))
 {
     bpe.AddAdditionalSpecialToken("<|endoftext|>");
@@ -818,17 +932,18 @@ int VAE::process(const ncnn::Mat& latent, ncnn::Mat& outimage)
     return 0;
 }
 
-int VAE::process_tiled(const ncnn::Mat& latent, int tile_size, ncnn::Mat& outimage)
+int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height, ncnn::Mat& outimage)
 {
-    const int latent_tile_size = tile_size / 8;
+    const int latent_tile_width = tile_width / 8;
+    const int latent_tile_height = tile_height / 8;
 
-    if (latent_tile_size >= std::max(latent.w, latent.h))
+    if (latent_tile_width >= latent.w && latent_tile_height >= latent.h)
     {
         return process(latent, outimage);
     }
 
     ncnn::Mat latent_small;
-    ncnn::resize_nearest(latent, latent_small, latent_tile_size, latent_tile_size);
+    ncnn::resize_nearest(latent, latent_small, latent_tile_width, latent_tile_height);
 
     // estimate attention output
     ncnn::Mat attn_small;
@@ -870,13 +985,8 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_size, ncnn::Mat& outima
 
         outimage.create(width, height, (size_t)3u, 3);
 
-        const int TILES_H = (latent.h + latent_tile_size - 1) / latent_tile_size;
-        const int TILES_W = (latent.w + latent_tile_size - 1) / latent_tile_size;
-
-        // NCNN_LOGE("latent_tile_size %d", latent_tile_size);
-        // NCNN_LOGE("latent %d x %d", latent.w, latent.h);
-        // NCNN_LOGE("outimage %d x %d", outimage.w, outimage.h);
-        // NCNN_LOGE("TILES %d x %d", TILES_W, TILES_H);
+        const int TILES_H = (latent.h + latent_tile_height - 1) / latent_tile_height;
+        const int TILES_W = (latent.w + latent_tile_width - 1) / latent_tile_width;
 
         ncnn::Option opt;
         opt.num_threads = 1;
@@ -889,10 +999,10 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_size, ncnn::Mat& outima
                 ncnn::Mat latent_tile;
                 ncnn::Mat attn_tile;
                 {
-                    int starty = std::max(0, ty * latent_tile_size - TILE_PAD);
-                    int endy = std::min(latent.h, (ty + 1) * latent_tile_size + TILE_PAD);
-                    int startx = std::max(0, tx * latent_tile_size - TILE_PAD);
-                    int endx = std::min(latent.w, (tx + 1) * latent_tile_size + TILE_PAD);
+                    int starty = std::max(0, ty * latent_tile_height - TILE_PAD);
+                    int endy = std::min(latent.h, (ty + 1) * latent_tile_height + TILE_PAD);
+                    int startx = std::max(0, tx * latent_tile_width - TILE_PAD);
+                    int endx = std::min(latent.w, (tx + 1) * latent_tile_width + TILE_PAD);
 
                     // NCNN_LOGE("tile %d %d    %d ~ %d  %d ~ %d", ty, tx, starty, endy, startx, endx);
 
@@ -932,10 +1042,10 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_size, ncnn::Mat& outima
 
                 // paste to out image roi
                 {
-                    int out_starty = std::max(0, ty * tile_size);
-                    int out_endy = std::min(height, (ty + 1) * tile_size);
-                    int out_startx = std::max(0, tx * tile_size);
-                    int out_endx = std::min(width, (tx + 1) * tile_size);
+                    int out_starty = std::max(0, ty * tile_height);
+                    int out_endy = std::min(height, (ty + 1) * tile_height);
+                    int out_startx = std::max(0, tx * tile_width);
+                    int out_endx = std::min(width, (tx + 1) * tile_width);
 
                     // NCNN_LOGE("out tile %d %d    %d ~ %d  %d ~ %d", ty, tx, out_starty, out_endy, out_startx, out_endx);
 
