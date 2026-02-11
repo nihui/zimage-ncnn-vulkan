@@ -41,8 +41,9 @@ Usage: zimage-ncnn-vulkan -p prompt -o outfile [options]...
   -n negative-prompt   negative prompt (optional)
   -o output-path       output image path (default=out.png)
   -s image-size        image resolution (default=1024,1024)
-  -l steps             denoise steps (default=9)
+  -l steps             denoise steps (default=auto)
   -r random-seed       random seed (default=rand)
+  -m model-path        z-image model path (default=z-image-turbo)
   -g gpu-id            gpu device to use (-1=cpu, default=auto)
 ```
 
