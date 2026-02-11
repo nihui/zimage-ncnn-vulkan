@@ -11,6 +11,12 @@
 
 #include <random>
 
+// ncnn
+#include "layer.h"
+#include "layer_type.h"
+#include "paramdict.h"
+#include "modelbin.h"
+
 namespace ZImage {
 
 void generate_latent(int width, int height, int seed, ncnn::Mat& latent)
@@ -259,6 +265,120 @@ void unpatchify(const ncnn::Mat& x, ncnn::Mat& latent)
             }
         }
     }
+}
+
+// Compute optimal tile size for splitting an image of (width x height) into tiles.
+//
+// Constraints:
+//   - width and height are always multiples of 16.
+//   - tile_size_w and tile_size_h must be multiples of 16.
+//   - tile_size_w * tile_size_h <= max_tile_area_size.
+//   - The tile aspect ratio should be as close as possible to width:height.
+//   - The tiling should evenly divide the image to avoid very small leftover tiles.
+static int align_up_16(int val)
+{
+    return ((val + 15) / 16) * 16;
+}
+
+void get_optimal_tile_size(int width, int height, int max_tile_area, int* tile_width, int* tile_height)
+{
+    // If the whole image fits in one tile, just return the original size.
+    if ((long long)width * height <= max_tile_area)
+    {
+        *tile_width = width;
+        *tile_height = height;
+        return;
+    }
+
+    double input_ratio = (double)width / (double)height;
+    double best_score  = -1.0;
+    int    best_tw     = 16;
+    int    best_th     = 16;
+
+    // Enumerate the number of horizontal splits (nx) and vertical splits (ny).
+    // For each (nx, ny) pair, compute the candidate tile size, then score it.
+    //
+    // tile_w = ceil(width  / nx)  aligned up to 16
+    // tile_h = ceil(height / ny)  aligned up to 16
+    //
+    // Maximum possible nx = width/16, ny = height/16 (tile at least 16x16).
+    int max_nx = width  / 16;
+    int max_ny = height / 16;
+
+    for (int nx = 1; nx <= max_nx; nx++)
+    {
+        // Candidate tile width: distribute width into nx pieces, align up to 16.
+        int tw = align_up_16((width + nx - 1) / nx);
+        if (tw > width)
+            tw = width;
+        if (tw < 16)
+            tw = 16;
+
+        for (int ny = 1; ny <= max_ny; ny++)
+        {
+            int th = align_up_16((height + ny - 1) / ny);
+            if (th > height)
+                th = height;
+            if (th < 16)
+                th = 16;
+
+            // Area constraint.
+            if ((long long)tw * th > max_tile_area)
+                continue;
+
+            // --- Scoring ---
+            //
+            // 1. Aspect-ratio similarity (higher is better, max = 1.0):
+            //    ratio_score = min(r1/r2, r2/r1)  where r1 = tw/th, r2 = width/height
+            double tile_ratio  = (double)tw / (double)th;
+            double ratio_score = (tile_ratio < input_ratio)
+                                     ? tile_ratio / input_ratio
+                                     : input_ratio / tile_ratio;
+
+            // 2. Utilization: how well does the tiling cover the image without
+            //    creating tiny leftover strips?
+            //
+            //    actual_nx = ceil(width / tw),  actual_ny = ceil(height / th)
+            //    last_w = width  - (actual_nx - 1) * tw
+            //    last_h = height - (actual_ny - 1) * th
+            //
+            //    We want last_w / tw and last_h / th to be as close to 1 as
+            //    possible (perfect division), or at least not too small.
+            //    util = (last_w / tw) * (last_h / th)   range (0, 1]
+            int actual_nx = (width  + tw - 1) / tw;
+            int actual_ny = (height + th - 1) / th;
+            int last_w = width  - (actual_nx - 1) * tw;
+            int last_h = height - (actual_ny - 1) * th;
+            if (last_w <= 0)
+                last_w = tw;
+            if (last_h <= 0)
+                last_h = th;
+            double util_w = (double)last_w / (double)tw;
+            double util_h = (double)last_h / (double)th;
+            double util   = util_w * util_h;
+
+            // 3. Tile area efficiency: prefer larger tiles (fewer tiles total)
+            //    as long as they satisfy the constraints.
+            //    area_score = (tw * th) / max_tile_area   range (0, 1]
+            double area_score = (double)((long long)tw * th) / (double)max_tile_area;
+
+            // Combined score (weights chosen empirically):
+            //   - utilization is the most important (avoid tiny scraps)
+            //   - ratio preservation is second
+            //   - area efficiency is third (prefer fewer, bigger tiles)
+            double score = 0.45 * util + 0.35 * ratio_score + 0.20 * area_score;
+
+            if (score > best_score)
+            {
+                best_score = score;
+                best_tw = tw;
+                best_th = th;
+            }
+        }
+    }
+
+    *tile_width = best_tw;
+    *tile_height = best_th;
 }
 
 Tokenizer::Tokenizer() : bpe(BpeTokenizer::LoadFromFiles("vocab.txt", "merges.txt", SpecialTokensConfig{}, false, true, true))
@@ -535,22 +655,411 @@ int AllFinalLayer::process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, n
     return 0;
 }
 
-int VAE::load(const ncnn::Option& opt)
+// 0 = inference
+// 1 = inference and collect mean and var
+// 2 = inference with collected mean and var
+static thread_local int g_vae_tiled_groupnorm_state = 0;
+static thread_local std::vector< std::vector<float> > g_means;
+static thread_local std::vector< std::vector<float> > g_vars;
+static thread_local int g_groupnorm_count = 0;
+
+class VAETiledGroupNorm : public ncnn::Layer
 {
-    vae.opt = opt;
-    vae.load_param("z_image_turbo_vae.ncnn.param");
-    vae.load_model("z_image_turbo_vae.ncnn.bin");
+public:
+    VAETiledGroupNorm();
+
+    virtual int load_param(const ncnn::ParamDict& pd);
+    virtual int load_model(const ncnn::ModelBin& mb);
+    virtual int forward_inplace(ncnn::Mat& bottom_top_blob, const ncnn::Option& opt) const;
+
+public:
+    // param
+    int group;
+    int channels;
+    float eps;
+    int affine;
+
+    // model
+    ncnn::Mat gamma_data;
+    ncnn::Mat beta_data;
+
+    int g_meanvar_index;
+};
+
+DEFINE_LAYER_CREATOR(VAETiledGroupNorm)
+
+VAETiledGroupNorm::VAETiledGroupNorm()
+{
+    one_blob_only = true;
+    support_inplace = true;
+
+    g_meanvar_index = g_groupnorm_count;
+    g_groupnorm_count++;
+}
+
+int VAETiledGroupNorm::load_param(const ncnn::ParamDict& pd)
+{
+    group = pd.get(0, 1);
+    channels = pd.get(1, 0);
+    eps = pd.get(2, 0.001f);
+    affine = pd.get(3, 1);
 
     return 0;
 }
 
-int VAE::process(const ncnn::Mat& latent, ncnn::Mat& vae_out)
+int VAETiledGroupNorm::load_model(const ncnn::ModelBin& mb)
 {
+    if (affine == 0)
+        return 0;
+
+    gamma_data = mb.load(channels, 1);
+    if (gamma_data.empty())
+        return -100;
+
+    beta_data = mb.load(channels, 1);
+    if (beta_data.empty())
+        return -100;
+
+    return 0;
+}
+
+static void groupnorm(float* ptr, float& mean, float& var, const float* gamma_ptr, const float* beta_ptr, float eps, int channels, int size, size_t cstep)
+{
+    if (g_vae_tiled_groupnorm_state == 0 || g_vae_tiled_groupnorm_state == 1)
+    {
+        float sum = 0.f;
+        for (int q = 0; q < channels; q++)
+        {
+            const float* ptr0 = ptr + cstep * q;
+            for (int i = 0; i < size; i++)
+            {
+                sum += ptr0[i];
+            }
+        }
+
+        mean = sum / (channels * size);
+
+        float sqsum = 0.f;
+        for (int q = 0; q < channels; q++)
+        {
+            const float* ptr0 = ptr + cstep * q;
+            for (int i = 0; i < size; i++)
+            {
+                float v = ptr0[i] - mean;
+                sqsum += v * v;
+            }
+        }
+
+        var = sqsum / (channels * size);
+    }
+
+    float a = 1.f / sqrtf(var + eps);
+    float b = -mean * a;
+
+    if (gamma_ptr && beta_ptr)
+    {
+        for (int q = 0; q < channels; q++)
+        {
+            float* ptr0 = ptr + cstep * q;
+            const float gamma = gamma_ptr[q];
+            const float beta = beta_ptr[q];
+            for (int i = 0; i < size; i++)
+            {
+                ptr0[i] = (ptr0[i] * a + b) * gamma + beta;
+            }
+        }
+    }
+    else
+    {
+        for (int q = 0; q < channels; q++)
+        {
+            float* ptr0 = ptr + cstep * q;
+            for (int i = 0; i < size; i++)
+            {
+                ptr0[i] = ptr0[i] * a + b;
+            }
+        }
+    }
+}
+
+int VAETiledGroupNorm::forward_inplace(ncnn::Mat& bottom_top_blob, const ncnn::Option& opt) const
+{
+    const int dims = bottom_top_blob.dims;
+    const int channels_g = channels / group;
+
+    std::vector<float> means;
+    std::vector<float> vars;
+    if (g_vae_tiled_groupnorm_state == 1)
+    {
+        means.resize(group);
+        vars.resize(group);
+    }
+    if (g_vae_tiled_groupnorm_state == 2)
+    {
+        means = g_means[g_meanvar_index];
+        vars = g_vars[g_meanvar_index];
+    }
+
+    if (dims == 1)
+    {
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int g = 0; g < group; g++)
+        {
+            float mean;
+            float var;
+            if (g_vae_tiled_groupnorm_state == 2)
+            {
+                mean = means[g];
+                var = vars[g];
+            }
+
+            ncnn::Mat bottom_top_blob_g = bottom_top_blob.range(g * channels_g, channels_g);
+            const float* gamma_ptr = affine ? (const float*)gamma_data + g * channels_g : 0;
+            const float* beta_ptr = affine ? (const float*)beta_data + g * channels_g : 0;
+            groupnorm(bottom_top_blob_g, mean, var, gamma_ptr, beta_ptr, eps, channels_g, 1, 1);
+
+            if (g_vae_tiled_groupnorm_state == 1)
+            {
+                means[g] = mean;
+                vars[g] = var;
+            }
+        }
+    }
+
+    if (dims == 2)
+    {
+        const int w = bottom_top_blob.w;
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int g = 0; g < group; g++)
+        {
+            float mean;
+            float var;
+            if (g_vae_tiled_groupnorm_state == 2)
+            {
+                mean = means[g];
+                var = vars[g];
+            }
+
+            ncnn::Mat bottom_top_blob_g = bottom_top_blob.row_range(g * channels_g, channels_g);
+            const float* gamma_ptr = affine ? (const float*)gamma_data + g * channels_g : 0;
+            const float* beta_ptr = affine ? (const float*)beta_data + g * channels_g : 0;
+            groupnorm(bottom_top_blob_g, mean, var, gamma_ptr, beta_ptr, eps, channels_g, w, w);
+
+            if (g_vae_tiled_groupnorm_state == 1)
+            {
+                means[g] = mean;
+                vars[g] = var;
+            }
+        }
+    }
+
+    if (dims == 3 || dims == 4)
+    {
+        const int size = bottom_top_blob.w * bottom_top_blob.h * bottom_top_blob.d;
+        const size_t cstep = bottom_top_blob.cstep;
+
+        #pragma omp parallel for num_threads(opt.num_threads)
+        for (int g = 0; g < group; g++)
+        {
+            float mean;
+            float var;
+            if (g_vae_tiled_groupnorm_state == 2)
+            {
+                mean = means[g];
+                var = vars[g];
+            }
+
+            ncnn::Mat bottom_top_blob_g = bottom_top_blob.channel_range(g * channels_g, channels_g);
+            const float* gamma_ptr = affine ? (const float*)gamma_data + g * channels_g : 0;
+            const float* beta_ptr = affine ? (const float*)beta_data + g * channels_g : 0;
+            groupnorm(bottom_top_blob_g, mean, var, gamma_ptr, beta_ptr, eps, channels_g, size, cstep);
+
+            if (g_vae_tiled_groupnorm_state == 1)
+            {
+                means[g] = mean;
+                vars[g] = var;
+            }
+        }
+    }
+
+    if (g_vae_tiled_groupnorm_state == 1)
+    {
+        g_means[g_meanvar_index] = means;
+        g_vars[g_meanvar_index] = vars;
+    }
+
+    return 0;
+}
+
+int VAE::load(const ncnn::Option& opt)
+{
+    vae.opt = opt;
+    vae.register_custom_layer("GroupNorm", VAETiledGroupNorm_layer_creator);
+    vae.load_param("z_image_turbo_vae.ncnn.param");
+    vae.load_model("z_image_turbo_vae.ncnn.bin");
+
+    g_means.resize(g_groupnorm_count);
+    g_vars.resize(g_groupnorm_count);
+
+    return 0;
+}
+
+int VAE::process(const ncnn::Mat& latent, ncnn::Mat& outimage)
+{
+    g_vae_tiled_groupnorm_state = 0;
+
     ncnn::Extractor ex = vae.create_extractor();
 
     ex.input("in0", latent);
 
+    ncnn::Mat vae_out;
     ex.extract("out0", vae_out);
+
+    // -1 ~ 1 to 0 ~ 255
+    const float mean_vals[3] = {-1.f, -1.f, -1.f};
+    const float norm_vals[3] = {127.5f, 127.5f, 127.5f};
+    vae_out.substract_mean_normalize(mean_vals, norm_vals);
+
+    outimage.create(vae_out.w, vae_out.h, (size_t)3u, 3);
+
+#if _WIN32
+    vae_out.to_pixels((unsigned char*)outimage.data, ncnn::Mat::PIXEL_RGB2BGR);
+#else
+    vae_out.to_pixels((unsigned char*)outimage.data, ncnn::Mat::PIXEL_RGB);
+#endif
+
+    return 0;
+}
+
+int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height, ncnn::Mat& outimage)
+{
+    const int latent_tile_width = tile_width / 8;
+    const int latent_tile_height = tile_height / 8;
+
+    if (latent_tile_width >= latent.w && latent_tile_height >= latent.h)
+    {
+        return process(latent, outimage);
+    }
+
+    ncnn::Mat latent_small;
+    ncnn::resize_nearest(latent, latent_small, latent_tile_width, latent_tile_height);
+
+    // estimate attention output
+    ncnn::Mat attn_small;
+    ncnn::Mat attn;
+    {
+        g_vae_tiled_groupnorm_state = 0;
+
+        ncnn::Extractor ex = vae.create_extractor();
+
+        ex.input("in0", latent_small);
+
+        ex.extract("19", attn_small);
+
+        ncnn::resize_bilinear(attn_small, attn, latent.w, latent.h);
+    }
+
+    // collect groupnorm mean and var
+    {
+        g_vae_tiled_groupnorm_state = 1;
+
+        ncnn::Extractor ex = vae.create_extractor();
+
+        ex.input("in0", latent_small);
+
+        ex.input("19", attn_small);
+
+        ncnn::Mat stub;
+        ex.extract("out0", stub);
+    }
+
+    // tiled vae with pad 4
+    {
+        g_vae_tiled_groupnorm_state = 2;
+
+        const int TILE_PAD = 4;
+
+        const int width = latent.w * 8;
+        const int height = latent.h * 8;
+
+        outimage.create(width, height, (size_t)3u, 3);
+
+        const int TILES_H = (latent.h + latent_tile_height - 1) / latent_tile_height;
+        const int TILES_W = (latent.w + latent_tile_width - 1) / latent_tile_width;
+
+        ncnn::Option opt;
+        opt.num_threads = 1;
+
+        for (int ty = 0; ty < TILES_H; ty++)
+        {
+            for (int tx = 0; tx < TILES_W; tx++)
+            {
+                // crop latent and attn tile
+                ncnn::Mat latent_tile;
+                ncnn::Mat attn_tile;
+                {
+                    int starty = std::max(0, ty * latent_tile_height - TILE_PAD);
+                    int endy = std::min(latent.h, (ty + 1) * latent_tile_height + TILE_PAD);
+                    int startx = std::max(0, tx * latent_tile_width - TILE_PAD);
+                    int endx = std::min(latent.w, (tx + 1) * latent_tile_width + TILE_PAD);
+
+                    // NCNN_LOGE("tile %d %d    %d ~ %d  %d ~ %d", ty, tx, starty, endy, startx, endx);
+
+                    ncnn::copy_cut_border(latent, latent_tile, starty, latent.h - endy, startx, latent.w - endx, opt);
+                    ncnn::copy_cut_border(attn, attn_tile, starty, latent.h - endy, startx, latent.w - endx, opt);
+                }
+
+                ncnn::Mat vae_out_tile;
+                {
+                    ncnn::Extractor ex = vae.create_extractor();
+
+                    ex.input("in0", latent_tile);
+
+                    ex.input("19", attn_tile);
+
+                    ex.extract("out0", vae_out_tile);
+                }
+
+                // NCNN_LOGE("vae_out_tile %d x %d", vae_out_tile.w, vae_out_tile.h);
+
+                // crop to target roi
+                {
+                    int pad_top = ty == 0 ? 0 : TILE_PAD * 8;
+                    int pad_bottom = ty == TILES_H - 1 ? 0 : TILE_PAD * 8;
+                    int pad_left = tx == 0 ? 0 : TILE_PAD * 8;
+                    int pad_right = tx == TILES_W - 1 ? 0 : TILE_PAD * 8;
+
+                    ncnn::Mat vae_out_tile_roi;
+                    ncnn::copy_cut_border(vae_out_tile, vae_out_tile_roi, pad_top, pad_bottom, pad_left, pad_right, opt);
+                    vae_out_tile = vae_out_tile_roi;
+                }
+
+                // -1 ~ 1 to 0 ~ 255
+                const float mean_vals[3] = {-1.f, -1.f, -1.f};
+                const float norm_vals[3] = {127.5f, 127.5f, 127.5f};
+                vae_out_tile.substract_mean_normalize(mean_vals, norm_vals);
+
+                // paste to out image roi
+                {
+                    int out_starty = std::max(0, ty * tile_height);
+                    int out_endy = std::min(height, (ty + 1) * tile_height);
+                    int out_startx = std::max(0, tx * tile_width);
+                    int out_endx = std::min(width, (tx + 1) * tile_width);
+
+                    // NCNN_LOGE("out tile %d %d    %d ~ %d  %d ~ %d", ty, tx, out_starty, out_endy, out_startx, out_endx);
+
+                    unsigned char* data = (unsigned char*)outimage.data + (out_starty * width + out_startx) * 3;
+#if _WIN32
+                    vae_out_tile.to_pixels(data, ncnn::Mat::PIXEL_RGB2BGR, width * 3);
+#else
+                    vae_out_tile.to_pixels(data, ncnn::Mat::PIXEL_RGB, width * 3);
+#endif
+                }
+            }
+        }
+
+    }
 
     return 0;
 }

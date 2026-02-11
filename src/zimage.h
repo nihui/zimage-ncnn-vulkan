@@ -33,6 +33,8 @@ void patchify(const ncnn::Mat& latent, ncnn::Mat& x);
 
 void unpatchify(const ncnn::Mat& x, ncnn::Mat& latent);
 
+void get_optimal_tile_size(int width, int height, int max_tile_area, int* tile_width, int* tile_height);
+
 class Tokenizer
 {
 public:
@@ -137,7 +139,9 @@ class VAE
 public:
     int load(const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& latent, ncnn::Mat& vae_out);
+    int process(const ncnn::Mat& latent, ncnn::Mat& outimage);
+
+    int process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height, ncnn::Mat& outimage);
 
 private:
     ncnn::Net vae;
