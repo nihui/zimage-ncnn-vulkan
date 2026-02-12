@@ -124,7 +124,7 @@ int main(int argc, char** argv)
     int steps = -1;
     int seed = rand();
     path_t model = PATHSTR("z-image-turbo");
-    int gpuid = ncnn::get_default_gpu_index();
+    int gpuid = 233;
 
     // parse cli args
     {
@@ -265,6 +265,15 @@ int main(int argc, char** argv)
         fprintf(stderr, "unknown model dir type\n");
         return -1;
     }
+
+    if (gpuid == 233)
+    {
+        gpuid = ncnn::get_default_gpu_index();
+    }
+
+#if _WIN32
+    CoInitializeEx(NULL, COINIT_MULTITHREADED);
+#endif
 
 #if _WIN32
     fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());

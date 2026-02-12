@@ -2,9 +2,26 @@
 
 :exclamation: :exclamation: :exclamation: This software is in the early development stage, it may bite your cat
 
+![CI](https://github.com/nihui/zimage-ncnn-vulkan/workflows/CI/badge.svg)
+![download](https://img.shields.io/github/downloads/nihui/zimage-ncnn-vulkan/total.svg)
+
 ncnn implementation of Z-Image image generater.
 
 zimage-ncnn-vulkan uses [ncnn project](https://github.com/Tencent/ncnn) as the universal neural network inference framework.
+
+## [Download](https://github.com/nihui/zimage-ncnn-vulkan/releases)
+
+Download Windows/Linux/macOS Executable for Intel/AMD/NVIDIA/Apple-Silicon GPU
+
+**https://github.com/nihui/zimage-ncnn-vulkan/releases**
+
+This package includes all the binaries required. It is portable, so no CUDA or PyTorch runtime environment is needed :)
+
+### prepare model files
+
+Download the z-image-turbo and z-image model folders to the same directory as the executable file
+
+https://huggingface.co/nihui-szyl/z-image-ncnn/tree/main
 
 ## About Z-Image
 
@@ -18,12 +35,6 @@ https://github.com/Tongyi-MAI/Z-Image
 
 - Minimum: 16GB RAM, any Vulkan integrated GPU
 - Recommended: 32GB RAM, 16GB dedicated GPU with tensorcore/matrix hardware
-
-### prepare model files
-
-https://huggingface.co/nihui-szyl/z-image-ncnn/tree/main/z-image-turbo
-
-https://huggingface.co/nihui-szyl/z-image-ncnn/tree/main/z-image
 
 ### Example Command
 
