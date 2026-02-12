@@ -1,5 +1,7 @@
 # Z-Image ncnn Vulkan
 
+:exclamation: :exclamation: :exclamation: This software is in the early development stage, it may bite your cat
+
 ![CI](https://github.com/nihui/zimage-ncnn-vulkan/workflows/CI/badge.svg)
 ![download](https://img.shields.io/github/downloads/nihui/zimage-ncnn-vulkan/total.svg)
 
