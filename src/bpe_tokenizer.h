@@ -61,7 +61,6 @@ public:
     const SpecialTokenIds& special_ids() const { return special_ids_; }
     bool fallback_to_chars() const { return fallback_to_chars_; }
 
-    // 追加 / 设置 additional_special_tokens（encode/decode 优先级最高）
     void AddAdditionalSpecialToken(const std::string& token,
                                    bool add_if_missing = true);
 
@@ -72,7 +71,6 @@ public:
         return additional_special_token_ids_;
     }
 
-    // 明确语义：禁止拷贝，允许移动
     BpeTokenizer(const BpeTokenizer&) = delete;
     BpeTokenizer& operator=(const BpeTokenizer&) = delete;
     BpeTokenizer(BpeTokenizer&& other) noexcept;
@@ -118,10 +116,6 @@ private:
     SpecialTokenIds special_ids_;
     bool fallback_to_chars_ = true;
 
-    // additional_special_tokens（在 encode/decode 中优先级最高）
-    // 1) encode 时，先在原始字符串中按子串匹配这些 token，匹配后直接映射到 id，
-    //    不再参与 BPE。
-    // 2) decode 时，将其视为特殊 token，skip_special_tokens=true 时会跳过。
     std::vector<std::string> additional_special_tokens_;
     std::vector<int> additional_special_token_ids_;
     std::unordered_map<std::string, int> additional_special_token_to_id_;
