@@ -33,7 +33,20 @@ https://github.com/Tongyi-MAI/Z-Image
 
 ### requirements
 
-- Minimum: 16GB RAM, any Vulkan integrated GPU
+- Minimum (Linux / macOS): 16GB RAM, any Vulkan capable GPU
+
+- Minimum (Windows):
+
+  *Due to WDDM limitations: Vulkan applications can only use half of the system RAM.*
+
+  *The following condition shall be met:* **(Half of system RAM) + (GPU memory) >= 16GB**
+
+  Examples of valid combinations:
+  - Any amount RAM, 16GB dedicated GPU
+  - 16GB RAM, 8GB dedicated GPU
+  - 24GB RAM, 4GB dedicated GPU
+  - 32GB RAM, any Vulkan capable GPU
+
 - Recommended: 32GB RAM, 16GB dedicated GPU with tensorcore/matrix hardware
 
 ### Example Command
