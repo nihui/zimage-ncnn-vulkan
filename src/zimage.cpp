@@ -1118,19 +1118,17 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height,
         {
             for (int tx = 0; tx < TILES_W; tx++)
             {
+                const int latent_starty = std::max(0, ty * latent_tile_height - TILE_PAD);
+                const int latent_endy = std::min(latent.h, (ty + 1) * latent_tile_height + TILE_PAD);
+                const int latent_startx = std::max(0, tx * latent_tile_width - TILE_PAD);
+                const int latent_endx = std::min(latent.w, (tx + 1) * latent_tile_width + TILE_PAD);
+
                 // crop latent and attn tile
                 ncnn::Mat latent_tile;
                 ncnn::Mat attn_tile;
                 {
-                    int starty = std::max(0, ty * latent_tile_height - TILE_PAD);
-                    int endy = std::min(latent.h, (ty + 1) * latent_tile_height + TILE_PAD);
-                    int startx = std::max(0, tx * latent_tile_width - TILE_PAD);
-                    int endx = std::min(latent.w, (tx + 1) * latent_tile_width + TILE_PAD);
-
-                    // NCNN_LOGE("tile %d %d    %d ~ %d  %d ~ %d", ty, tx, starty, endy, startx, endx);
-
-                    ncnn::copy_cut_border(latent, latent_tile, starty, latent.h - endy, startx, latent.w - endx, opt);
-                    ncnn::copy_cut_border(attn, attn_tile, starty, latent.h - endy, startx, latent.w - endx, opt);
+                    ncnn::copy_cut_border(latent, latent_tile, latent_starty, latent.h - latent_endy, latent_startx, latent.w - latent_endx, opt);
+                    ncnn::copy_cut_border(attn, attn_tile, latent_starty, latent.h - latent_endy, latent_startx, latent.w - latent_endx, opt);
                 }
 
                 ncnn::Mat vae_out_tile;
@@ -1148,13 +1146,18 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height,
 
                 // crop to target roi
                 {
-                    int pad_top = ty == 0 ? 0 : TILE_PAD * 8;
-                    int pad_bottom = ty == TILES_H - 1 ? 0 : TILE_PAD * 8;
-                    int pad_left = tx == 0 ? 0 : TILE_PAD * 8;
-                    int pad_right = tx == TILES_W - 1 ? 0 : TILE_PAD * 8;
+                    const int actual_pad_top = ty * latent_tile_height - latent_starty;
+                    const int actual_pad_bottom = latent_endy - std::min(latent.h, (ty + 1) * latent_tile_height);
+                    const int actual_pad_left = tx * latent_tile_width - latent_startx;
+                    const int actual_pad_right = latent_endx - std::min(latent.w, (tx + 1) * latent_tile_width);
+
+                    const int pixel_pad_top = actual_pad_top * 8;
+                    const int pixel_pad_bottom = actual_pad_bottom * 8;
+                    const int pixel_pad_left = actual_pad_left * 8;
+                    const int pixel_pad_right = actual_pad_right * 8;
 
                     ncnn::Mat vae_out_tile_roi;
-                    ncnn::copy_cut_border(vae_out_tile, vae_out_tile_roi, pad_top, pad_bottom, pad_left, pad_right, opt);
+                    ncnn::copy_cut_border(vae_out_tile, vae_out_tile_roi, pixel_pad_top, pixel_pad_bottom, pixel_pad_left, pixel_pad_right, opt);
                     vae_out_tile = vae_out_tile_roi;
                 }
 
@@ -1165,12 +1168,8 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height,
 
                 // paste to out image roi
                 {
-                    int out_starty = std::max(0, ty * tile_height);
-                    int out_endy = std::min(height, (ty + 1) * tile_height);
-                    int out_startx = std::max(0, tx * tile_width);
-                    int out_endx = std::min(width, (tx + 1) * tile_width);
-
-                    // NCNN_LOGE("out tile %d %d    %d ~ %d  %d ~ %d", ty, tx, out_starty, out_endy, out_startx, out_endx);
+                    const int out_starty = ty * latent_tile_height * 8;
+                    const int out_startx = tx * latent_tile_width * 8;
 
                     unsigned char* data = (unsigned char*)outimage.data + (out_starty * width + out_startx) * 3;
 #if _WIN32
