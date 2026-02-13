@@ -243,7 +243,7 @@ std::string BpeTokenizer::ByteDecode(const std::string& text) const {
 
 // ---------------- Pretokenizer ----------------
 std::vector<std::string> BpeTokenizer::PretokenizeSentencePiece(const std::string& text) {
-    static const std::string ws_mark = "▁";
+    static const std::string ws_mark = "\xE2\x96\x81";
     std::vector<std::string> out;
     std::string curr;
     curr.reserve(text.size());
@@ -354,15 +354,12 @@ BpeTokenizer::BpeTokenizer(BpeTokenizer&& other) noexcept
       use_byte_encoder_(other.use_byte_encoder_),
       byte_encoder_(std::move(other.byte_encoder_)),
       byte_decoder_(std::move(other.byte_decoder_)) {
-    // 迁移缓存（为安全起见加锁）
     std::lock_guard<std::mutex> lk(other.cache_mu_);
     bpe_cache_ = std::move(other.bpe_cache_);
-    // cache_mu_ 自身是新构造的 mutex
 }
 
 BpeTokenizer& BpeTokenizer::operator=(BpeTokenizer&& other) noexcept {
     if (this != &other) {
-        // 同时锁两边，避免数据竞争
         std::lock(cache_mu_, other.cache_mu_);
         std::lock_guard<std::mutex> lock1(cache_mu_, std::adopt_lock);
         std::lock_guard<std::mutex> lock2(other.cache_mu_, std::adopt_lock);
@@ -380,7 +377,6 @@ BpeTokenizer& BpeTokenizer::operator=(BpeTokenizer&& other) noexcept {
         byte_encoder_ = std::move(other.byte_encoder_);
         byte_decoder_ = std::move(other.byte_decoder_);
         bpe_cache_ = std::move(other.bpe_cache_);
-        // cache_mu_ 仍为当前对象自己的 mutex
     }
     return *this;
 }
@@ -408,7 +404,6 @@ BpeTokenizer BpeTokenizer::LoadFromFiles(const std::string& vocab_path,
     }
 
     tok.EnsureSpecialTokens(spec, add_special_if_missing);
-    // 显式移动，避免 MSVC 尝试拷贝
     return std::move(tok);
 }
 
@@ -435,7 +430,6 @@ BpeTokenizer BpeTokenizer::LoadFromFiles(const std::wstring& vocab_path,
     }
 
     tok.EnsureSpecialTokens(spec, add_special_if_missing);
-    // 显式移动，避免 MSVC 尝试拷贝
     return std::move(tok);
 }
 #endif
@@ -470,7 +464,6 @@ void BpeTokenizer::AddAdditionalSpecialToken(const std::string& token,
                                              bool add_if_missing) {
     if (token.empty()) return;
 
-    // 已经是 additional_special_token 的话直接返回
     auto it_exist = additional_special_token_to_id_.find(token);
     if (it_exist != additional_special_token_to_id_.end()) {
         return;
@@ -485,7 +478,6 @@ void BpeTokenizer::AddAdditionalSpecialToken(const std::string& token,
         id_to_token_.push_back(token);
         token_to_id_.emplace(token, id);
     } else {
-        // 既不在 vocab 中，也不允许新增，直接忽略
         return;
     }
 
@@ -518,10 +510,6 @@ std::vector<int> BpeTokenizer::encode(const std::string& text,
     if (add_cls && special_ids_.cls_id >= 0) ids.push_back(special_ids_.cls_id);
     if (add_bos && special_ids_.bos_id >= 0) ids.push_back(special_ids_.bos_id);
 
-    // 先在原始串中按子串匹配 additional_special_tokens；
-    // 命中时：
-    //   1) flush 之前累积的普通文本（走 SentencePiece+BPE）
-    //   2) 直接输出 special id
     std::string buffer;
     buffer.reserve(text.size());
 
@@ -551,7 +539,6 @@ std::vector<int> BpeTokenizer::encode(const std::string& text,
         int matched_index = -1;
         size_t matched_len = 0;
 
-        // longest match：若多个 special token 共享前缀，选择更长的那个
         if (!additional_special_tokens_.empty()) {
             for (size_t k = 0; k < additional_special_tokens_.size(); ++k) {
                 const std::string& sp = additional_special_tokens_[k];

@@ -40,7 +40,6 @@ void generate_latent(int width, int height, int seed, ncnn::Mat& latent)
 
 void rope_embedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin)
 {
-    // 确保预计算已完成
     const float theta = 256.0f;
     const int axes_dims[3] = {32, 48, 48};
     const int axes_lens[3] = {1024, 512, 512};
@@ -54,7 +53,6 @@ void rope_embedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin)
             int end = axes_lens[i];
             int half_dim = d / 2;
 
-            // 创建缓存 Mat, w=特征维(d/2), h=时间步(end)
             ncnn::Mat cos_mat(half_dim, end);
             ncnn::Mat sin_mat(half_dim, end);
 
@@ -65,12 +63,9 @@ void rope_embedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin)
 
                 for (int j = 0; j < half_dim; j++)
                 {
-                    // Python: freqs = 1.0 / (theta ** (torch.arange(0, d, 2) / d))
-                    // 指数部分: (2 * j) / d
                     float exponent = (float)(2 * j) / (float)d;
                     float freq = 1.0f / std::pow(theta, exponent);
 
-                    // Python: angles = torch.outer(timestep, freqs)
                     float angle = (float)t * freq;
 
                     cos_ptr[j] = std::cos(angle);
@@ -83,52 +78,41 @@ void rope_embedder(const ncnn::Mat& ids, ncnn::Mat& out_cos, ncnn::Mat& out_sin)
         }
     }
 
-    int seqlen = ids.h; // ncnn Mat 的 h 在这里对应 seqlen
+    int seqlen = ids.h;
 
     int total_dim = axes_dims[0] + axes_dims[1] + axes_dims[2];
     int total_half_dim = total_dim / 2;
 
-    // 分配输出 Mat
     out_cos.create(total_half_dim, seqlen);
     out_sin.create(total_half_dim, seqlen);
 
-    // 遍历每一个 sequence step
     for (int i = 0; i < seqlen; i++)
     {
-        // 获取当前步的索引 tuple [t, h, w]
         const int* id_ptr = ids.row<const int>(i);
 
-        // 获取输出 Mat 当前行的指针
         float* out_c_ptr = out_cos.row(i);
         float* out_s_ptr = out_sin.row(i);
 
         int current_offset = 0;
 
-        // 遍历 3 个轴 (axes)
         for (int axis = 0; axis < 3; axis++)
         {
-            // 获取对应轴的索引值
             int idx = (int)id_ptr[axis];
 
-            // 简单的边界保护
             if (idx < 0) idx = 0;
             if (idx >= axes_lens[axis]) idx = axes_lens[axis] - 1;
 
-            // 获取该轴的预计算表
             const ncnn::Mat& cache_c = freqs_cos[axis];
             const ncnn::Mat& cache_s = freqs_sin[axis];
 
-            // 该轴的特征长度
             int half_dim = axes_dims[axis] / 2;
 
-            // 从缓存中复制数据到输出
             const float* src_c = cache_c.row(idx);
             const float* src_s = cache_s.row(idx);
 
             memcpy(out_c_ptr + current_offset, src_c, half_dim * sizeof(float));
             memcpy(out_s_ptr + current_offset, src_s, half_dim * sizeof(float));
 
-            // 更新偏移量，准备拼接下一个轴的数据
             current_offset += half_dim;
         }
     }
