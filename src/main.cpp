@@ -244,6 +244,12 @@ int main(int argc, char** argv)
         return -1;
     }
 
+    if (width > 2048 || height > 2048)
+    {
+        fprintf(stderr, "width and height must be <= 2048 but got %d and %d\n", width, height);
+        return -1;
+    }
+
     float guidance_scale;
     float scheduler_shift;
     if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
@@ -303,6 +309,9 @@ int main(int argc, char** argv)
     opt.use_bf16_storage = gpuid >= 0;
     // opt.use_mapped_model_loading = true;
 
+    // disable winograd for reducing vae vram usage
+    opt.use_winograd_convolution = false;
+
     // estimate transformer and vae memory usage
     const uint32_t heap_budget = gpuid >= 0 ? ncnn::get_gpu_device(gpuid)->get_heap_budget() : 0;
 
@@ -317,7 +326,7 @@ int main(int argc, char** argv)
     int vae_tile_width = 0;
     int vae_tile_height = 0;
     {
-        int max_tile_area = (int)((float)heap_budget / 5700 * 1024 * 1024);
+        int max_tile_area = (int)((float)heap_budget / 6000 * 1024 * 1024);
         ZImage::get_optimal_tile_size(width, height, max_tile_area, &vae_tile_width, &vae_tile_height);
 
         NCNN_LOGE("vae_tile_size = %d x %d", vae_tile_width, vae_tile_height);
