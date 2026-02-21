@@ -565,11 +565,11 @@ int main(int argc, char** argv)
 
                 if (batch > 1)
                 {
-                    fprintf(stderr, "step %d/%d of image %d/%d done\n", z, steps, b, batch);
+                    fprintf(stderr, "step %d/%d of image %d/%d done\n", z + 1, steps, b + 1, batch);
                 }
                 else
                 {
-                    fprintf(stderr, "step %d/%d done\n", z, steps);
+                    fprintf(stderr, "step %d/%d done\n", z + 1, steps);
                 }
             }
 
@@ -611,7 +611,7 @@ int main(int argc, char** argv)
 
             if (batch > 1)
             {
-                fprintf(stderr, "vae of image %d/%d done\n", b, batch);
+                fprintf(stderr, "vae of image %d/%d done\n", b + 1, batch);
             }
             else
             {
