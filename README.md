@@ -69,6 +69,7 @@ Usage: zimage-ncnn-vulkan -p prompt -o outfile [options]...
   -r random-seed       random seed (default=rand)
   -m model-path        z-image model path (default=z-image-turbo)
   -g gpu-id            gpu device to use (-1=cpu, default=auto)
+  -b batch-size        batched generation (default=1)
 ```
 
 If you encounter a crash or error, try upgrading your GPU driver:
