@@ -97,6 +97,8 @@ public:
 
     int process(const ncnn::Mat& x, ncnn::Mat& x_embed);
 
+    int process(const ncnn::VkMat& x, ncnn::VkMat& x_embed, ncnn::VkCompute& cmd, const ncnn::Option& opt);
+
 private:
     ncnn::Net all_x_embedder;
 };
@@ -107,6 +109,8 @@ public:
     int load(const path_t& model, const ncnn::Option& opt);
 
     int process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, const ncnn::Mat& x_sin, const ncnn::Mat& t_embed, ncnn::Mat& x_embed_refine);
+
+    int process(const ncnn::VkMat& x_embed, const ncnn::VkMat& x_cos, const ncnn::VkMat& x_sin, const ncnn::VkMat& t_embed, ncnn::VkMat& x_embed_refine, ncnn::VkCompute& cmd, const ncnn::Option& opt);
 
 private:
     ncnn::Net noise_refiner;
@@ -119,6 +123,8 @@ public:
 
     int process(const ncnn::Mat& unified_embed, const ncnn::Mat& unified_cos, const ncnn::Mat& unified_sin, const ncnn::Mat& t_embed, ncnn::Mat& unified);
 
+    int process(const ncnn::VkMat& unified_embed, const ncnn::VkMat& unified_cos, const ncnn::VkMat& unified_sin, const ncnn::VkMat& t_embed, ncnn::VkMat& unified, ncnn::VkCompute& cmd, const ncnn::Option& opt);
+
 private:
     ncnn::Net unified_refiner;
 };
@@ -129,6 +135,8 @@ public:
     int load(const path_t& model, const ncnn::Option& opt);
 
     int process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, ncnn::Mat& unified_final);
+
+    int process(const ncnn::VkMat& unified, const ncnn::VkMat& t_embed, ncnn::VkMat& unified_final, ncnn::VkCompute& cmd, const ncnn::Option& opt);
 
 private:
     ncnn::Net all_final_layer;

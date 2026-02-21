@@ -1,0 +1,27 @@
+
+#version 450
+
+layout (constant_id = 0) const float guidance_scale = 0;
+
+layout (binding = 0) buffer pos_blob { sfpvec4 pos_blob_data[]; };
+layout (binding = 1) readonly buffer neg_blob { sfpvec4 neg_blob_data[]; };
+
+layout (push_constant) uniform parameter
+{
+    uint n;
+} p;
+
+void main()
+{
+    const uint gi = gl_GlobalInvocationID.x;
+
+    if (gi >= p.n)
+        return;
+
+    afpvec4 pos = buffer_ld4(pos_blob_data, gi);
+    afpvec4 neg = buffer_ld4(neg_blob_data, gi);
+
+    pos = pos + guidance_scale * (pos - neg);
+
+    buffer_st4(pos_blob_data, gi, pos);
+}

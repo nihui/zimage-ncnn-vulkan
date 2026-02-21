@@ -1,0 +1,26 @@
+
+#version 450
+
+layout (binding = 0) buffer x_blob { sfpvec4 x_blob_data[]; };
+layout (binding = 1) readonly buffer res_blob { sfpvec4 res_blob_data[]; };
+
+layout (push_constant) uniform parameter
+{
+    uint n;
+    float dt;
+} p;
+
+void main()
+{
+    const uint gi = gl_GlobalInvocationID.x;
+
+    if (gi >= p.n)
+        return;
+
+    afpvec4 x = buffer_ld4(x_blob_data, gi);
+    afpvec4 res = buffer_ld4(res_blob_data, gi);
+
+    x = x - p.dt * res;
+
+    buffer_st4(x_blob_data, gi, x);
+}

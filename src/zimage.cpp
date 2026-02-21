@@ -641,6 +641,20 @@ int AllXEmbedder::process(const ncnn::Mat& x, ncnn::Mat& x_embed)
     return 0;
 }
 
+int AllXEmbedder::process(const ncnn::VkMat& x, ncnn::VkMat& x_embed, ncnn::VkCompute& cmd, const ncnn::Option& opt)
+{
+    ncnn::Extractor ex = all_x_embedder.create_extractor();
+    ex.set_blob_vkallocator(opt.blob_vkallocator);
+    ex.set_workspace_vkallocator(opt.workspace_vkallocator);
+    ex.set_staging_vkallocator(opt.staging_vkallocator);
+
+    ex.input("in0", x);
+
+    ex.extract("out0", x_embed, cmd);
+
+    return 0;
+}
+
 int NoiseRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
     path_t parampath;
@@ -675,6 +689,23 @@ int NoiseRefiner::process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, cons
     ex.input("in3", t_embed);
 
     ex.extract("out0", x_embed_refine);
+
+    return 0;
+}
+
+int NoiseRefiner::process(const ncnn::VkMat& x_embed, const ncnn::VkMat& x_cos, const ncnn::VkMat& x_sin, const ncnn::VkMat& t_embed, ncnn::VkMat& x_embed_refine, ncnn::VkCompute& cmd, const ncnn::Option& opt)
+{
+    ncnn::Extractor ex = noise_refiner.create_extractor();
+    ex.set_blob_vkallocator(opt.blob_vkallocator);
+    ex.set_workspace_vkallocator(opt.workspace_vkallocator);
+    ex.set_staging_vkallocator(opt.staging_vkallocator);
+
+    ex.input("in0", x_embed);
+    ex.input("in1", x_cos);
+    ex.input("in2", x_sin);
+    ex.input("in3", t_embed);
+
+    ex.extract("out0", x_embed_refine, cmd);
 
     return 0;
 }
@@ -717,6 +748,23 @@ int UnifiedRefiner::process(const ncnn::Mat& unified_embed, const ncnn::Mat& uni
     return 0;
 }
 
+int UnifiedRefiner::process(const ncnn::VkMat& unified_embed, const ncnn::VkMat& unified_cos, const ncnn::VkMat& unified_sin, const ncnn::VkMat& t_embed, ncnn::VkMat& unified, ncnn::VkCompute& cmd, const ncnn::Option& opt)
+{
+    ncnn::Extractor ex = unified_refiner.create_extractor();
+    ex.set_blob_vkallocator(opt.blob_vkallocator);
+    ex.set_workspace_vkallocator(opt.workspace_vkallocator);
+    ex.set_staging_vkallocator(opt.staging_vkallocator);
+
+    ex.input("in0", unified_embed);
+    ex.input("in1", unified_cos);
+    ex.input("in2", unified_sin);
+    ex.input("in3", t_embed);
+
+    ex.extract("out0", unified, cmd);
+
+    return 0;
+}
+
 int AllFinalLayer::load(const path_t& model, const ncnn::Option& opt)
 {
     path_t parampath;
@@ -749,6 +797,21 @@ int AllFinalLayer::process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, n
     ex.input("in1", t_embed);
 
     ex.extract("out0", unified_final);
+
+    return 0;
+}
+
+int AllFinalLayer::process(const ncnn::VkMat& unified, const ncnn::VkMat& t_embed, ncnn::VkMat& unified_final, ncnn::VkCompute& cmd, const ncnn::Option& opt)
+{
+    ncnn::Extractor ex = all_final_layer.create_extractor();
+    ex.set_blob_vkallocator(opt.blob_vkallocator);
+    ex.set_workspace_vkallocator(opt.workspace_vkallocator);
+    ex.set_staging_vkallocator(opt.staging_vkallocator);
+
+    ex.input("in0", unified);
+    ex.input("in1", t_embed);
+
+    ex.extract("out0", unified_final, cmd);
 
     return 0;
 }
