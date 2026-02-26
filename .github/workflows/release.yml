@@ -139,7 +139,7 @@ jobs:
       with:
         submodules: 'recursive'
     - name: download-openmp-macos
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         name: openmp-macos
         path: openmp-macos
@@ -224,7 +224,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: download
-      uses: actions/download-artifact@v7
+      uses: actions/download-artifact@v8
       with:
         path: artifacts
 
