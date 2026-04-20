@@ -87,12 +87,17 @@ static std::vector<int> parse_optarg_int_array(const char* optarg)
 #endif // _WIN32
 
 // ncnn
+#include "layer.h"
 #include "mat.h"
 #include "net.h"
+#include "paramdict.h"
 
 #include "filesystem_utils.h"
 
 #include "zimage.h"
+
+#include "zimage_apply_cfg.comp.hex.h"
+#include "zimage_euler_step.comp.hex.h"
 
 static void print_usage()
 {
@@ -358,6 +363,22 @@ int main(int argc, char** argv)
 #endif
     }
 
+    ncnn::VulkanDevice* vkdev = gpuid == -1 ? 0 : ncnn::get_gpu_device(gpuid);
+
+    ncnn::VkAllocator* blob_vkallocator = 0;
+    ncnn::VkAllocator* staging_vkallocator = 0;
+    if (vkdev)
+    {
+        blob_vkallocator = vkdev->acquire_blob_allocator();
+        staging_vkallocator = vkdev->acquire_staging_allocator();
+
+        opt.blob_vkallocator = blob_vkallocator;
+        opt.workspace_vkallocator = blob_vkallocator;
+        opt.staging_vkallocator = staging_vkallocator;
+
+        opt.use_local_pool_allocator = false;
+    }
+
     // tokenizer
     std::vector<int> input_ids;
     std::vector<int> neg_input_ids;
@@ -491,75 +512,299 @@ int main(int argc, char** argv)
 
         all_final_layer.load(model, opt);
 
+        ncnn::Layer* op_concat_along_h = 0;
+        ncnn::VkMat cap_refine_gpu;
+        ncnn::VkMat neg_cap_refine_gpu;
+        ncnn::VkMat x_cos_gpu;
+        ncnn::VkMat x_sin_gpu;
+        ncnn::VkMat unified_cos_gpu;
+        ncnn::VkMat unified_sin_gpu;
+        ncnn::VkMat neg_unified_cos_gpu;
+        ncnn::VkMat neg_unified_sin_gpu;
+        ncnn::Pipeline* zimage_apply_cfg;
+        ncnn::Pipeline* zimage_euler_step;
+        if (vkdev)
+        {
+            // concat_along_h
+            {
+                op_concat_along_h = ncnn::create_layer_vulkan("Concat");
+                op_concat_along_h->vkdev = vkdev;
+
+                ncnn::ParamDict pd;
+                pd.set(0, 0);
+                op_concat_along_h->load_param(pd);
+
+                op_concat_along_h->create_pipeline(opt);
+            }
+
+            // upload cap_refine neg_cap_refine x_cos x_sin
+            {
+                ncnn::VkCompute cmd(vkdev);
+
+                cmd.record_upload(cap_refine, cap_refine_gpu, opt);
+                if (apply_cfg)
+                {
+                    cmd.record_upload(neg_cap_refine, neg_cap_refine_gpu, opt);
+                }
+
+                cmd.record_upload(x_cos, x_cos_gpu, opt);
+                cmd.record_upload(x_sin, x_sin_gpu, opt);
+
+                cmd.record_upload(unified_cos, unified_cos_gpu, opt);
+                cmd.record_upload(unified_sin, unified_sin_gpu, opt);
+                if (apply_cfg)
+                {
+                    cmd.record_upload(neg_unified_cos, neg_unified_cos_gpu, opt);
+                    cmd.record_upload(neg_unified_sin, neg_unified_sin_gpu, opt);
+                }
+
+                cmd.submit_and_wait();
+            }
+
+            // apply_cfg pipeline
+            {
+                static std::vector<uint32_t> spirv;
+                static ncnn::Mutex lock;
+                {
+                    ncnn::MutexLockGuard guard(lock);
+                    if (spirv.empty())
+                    {
+                        compile_spirv_module(zimage_apply_cfg_comp_data, sizeof(zimage_apply_cfg_comp_data), opt, spirv);
+                    }
+                }
+
+                std::vector<ncnn::vk_specialization_type> specializations(1);
+                specializations[0].f = guidance_scale;
+
+                zimage_apply_cfg = new ncnn::Pipeline(vkdev);
+                zimage_apply_cfg->set_local_size_xyz(vkdev->info.subgroup_size(), 1, 1);
+                zimage_apply_cfg->create(spirv.data(), spirv.size() * 4, specializations);
+            }
+
+            // euler_step pipeline
+            {
+                static std::vector<uint32_t> spirv;
+                static ncnn::Mutex lock;
+                {
+                    ncnn::MutexLockGuard guard(lock);
+                    if (spirv.empty())
+                    {
+                        compile_spirv_module(zimage_euler_step_comp_data, sizeof(zimage_euler_step_comp_data), opt, spirv);
+                    }
+                }
+
+                std::vector<ncnn::vk_specialization_type> specializations(0);
+
+                zimage_euler_step = new ncnn::Pipeline(vkdev);
+                zimage_euler_step->set_local_size_xyz(vkdev->info.subgroup_size(), 1, 1);
+                zimage_euler_step->create(spirv.data(), spirv.size() * 4, specializations);
+            }
+        }
+
         for (int b = 0; b < batch; b++)
         {
             // patchify
             ncnn::Mat x;
             ZImage::patchify(latents[b], x);
 
+            // upload x
+            ncnn::VkMat x_gpu;
+            if (vkdev)
+            {
+                ncnn::VkCompute cmd(vkdev);
+                cmd.record_upload(x, x_gpu, opt);
+
+                // unpack x
+                {
+                    ncnn::VkMat tmp;
+                    vkdev->convert_packing(x_gpu, tmp, 1, cmd, opt);
+                    x_gpu = tmp;
+                }
+
+                cmd.submit_and_wait();
+            }
+
             for (int z = 0; z < steps; z++)
             {
                 ncnn::Mat t_embed = t_embeds.row_range(z, 1).clone();
 
-                // all_x_embedder
-                ncnn::Mat x_embed;
-                all_x_embedder.process(x, x_embed);
-
-                // noise_refiner
-                ncnn::Mat x_embed_refine;
-                noise_refiner.process(x_embed, x_cos, x_sin, t_embed, x_embed_refine);
-
-                // concat x_embed_refine and cap_refine
-                ncnn::Mat unified_embed;
-                ZImage::concat_along_h(x_embed_refine, cap_refine, unified_embed);
-
-                ncnn::Mat neg_unified_embed;
-                if (apply_cfg)
+                if (vkdev)
                 {
-                    ZImage::concat_along_h(x_embed_refine, neg_cap_refine, neg_unified_embed);
-                }
+                    ncnn::VkCompute cmd(vkdev);
 
-                // unified
-                ncnn::Mat unified;
-                unified_refiner.process(unified_embed, unified_cos, unified_sin, t_embed, unified);
+                    // upload t_embed
+                    ncnn::VkMat t_embed_gpu;
+                    cmd.record_upload(t_embed, t_embed_gpu, opt);
 
-                ncnn::Mat neg_unified;
-                if (apply_cfg)
-                {
-                    unified_refiner.process(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified);
-                }
+                    // all_x_embedder
+                    ncnn::VkMat x_embed_gpu;
+                    all_x_embedder.process(x_gpu, x_embed_gpu, cmd, opt);
 
-                // all_final_layer
-                ncnn::Mat unified_final;
-                all_final_layer.process(unified, t_embed, unified_final);
+                    // noise_refiner
+                    ncnn::VkMat x_embed_refine_gpu;
+                    noise_refiner.process(x_embed_gpu, x_cos_gpu, x_sin_gpu, t_embed_gpu, x_embed_refine_gpu, cmd, opt);
 
-                ncnn::Mat neg_unified_final;
-                if (apply_cfg)
-                {
-                    all_final_layer.process(neg_unified, t_embed, neg_unified_final);
-                }
-
-                if (apply_cfg)
-                {
-                    // apply cfg
-                    const int total = x.total();
-                    for (int i = 0; i < total; i++)
+                    // concat x_embed_refine and cap_refine
+                    ncnn::VkMat unified_embed_gpu;
                     {
-                        float pos = unified_final[i];
-                        float neg = neg_unified_final[i];
+                        std::vector<ncnn::VkMat> bottom_blobs(2);
+                        bottom_blobs[0] = x_embed_refine_gpu;
+                        bottom_blobs[1] = cap_refine_gpu;
 
-                        unified_final[i] = pos + guidance_scale * (pos - neg);
+                        std::vector<ncnn::VkMat> top_blobs(1);
+                        op_concat_along_h->forward(bottom_blobs, top_blobs, cmd, opt);
+                        unified_embed_gpu = top_blobs[0];
                     }
-                }
 
-                // euler scheduler step
-                {
-                    const float dt = sigmas[z + 1] - sigmas[z];
-
-                    const int total = x.total();
-                    for (int i = 0; i < total; i++)
+                    ncnn::VkMat neg_unified_embed_gpu;
+                    if (apply_cfg)
                     {
-                        x[i] = x[i] - dt * unified_final[i];
+                        std::vector<ncnn::VkMat> bottom_blobs(2);
+                        bottom_blobs[0] = x_embed_refine_gpu;
+                        bottom_blobs[1] = neg_cap_refine_gpu;
+
+                        std::vector<ncnn::VkMat> top_blobs(1);
+                        op_concat_along_h->forward(bottom_blobs, top_blobs, cmd, opt);
+                        neg_unified_embed_gpu = top_blobs[0];
+                    }
+
+                    // unified
+                    ncnn::VkMat unified_gpu;
+                    unified_refiner.process(unified_embed_gpu, unified_cos_gpu, unified_sin_gpu, t_embed_gpu, unified_gpu, cmd, opt);
+
+                    ncnn::VkMat neg_unified_gpu;
+                    if (apply_cfg)
+                    {
+                        unified_refiner.process(neg_unified_embed_gpu, neg_unified_cos_gpu, neg_unified_sin_gpu, t_embed_gpu, neg_unified_gpu, cmd, opt);
+                    }
+
+                    // all_final_layer
+                    ncnn::VkMat unified_final_gpu;
+                    all_final_layer.process(unified_gpu, t_embed_gpu, unified_final_gpu, cmd, opt);
+
+                    ncnn::VkMat neg_unified_final_gpu;
+                    if (apply_cfg)
+                    {
+                        all_final_layer.process(neg_unified_gpu, t_embed_gpu, neg_unified_final_gpu, cmd, opt);
+                    }
+
+                    // upack unified_final
+                    if (unified_final_gpu.elempack != 1)
+                    {
+                        ncnn::VkMat tmp;
+                        vkdev->convert_packing(unified_final_gpu, tmp, 1, cmd, opt);
+                        unified_final_gpu = tmp;
+                    }
+                    if (apply_cfg && neg_unified_final_gpu.elempack != 1)
+                    {
+                        ncnn::VkMat tmp;
+                        vkdev->convert_packing(neg_unified_final_gpu, tmp, 1, cmd, opt);
+                        neg_unified_final_gpu = tmp;
+                    }
+
+                    if (apply_cfg)
+                    {
+                        // apply cfg
+                        const size_t n = x_gpu.total() / 4;
+
+                        std::vector<ncnn::VkMat> bindings(2);
+                        bindings[0] = unified_final_gpu;
+                        bindings[1] = neg_unified_final_gpu;
+
+                        std::vector<ncnn::vk_constant_type> constants(1);
+                        constants[0].u32 = n;
+
+                        ncnn::VkMat dispatcher;
+                        dispatcher.w = n;
+                        dispatcher.h = 1;
+                        dispatcher.c = 1;
+                        cmd.record_pipeline(zimage_apply_cfg, bindings, constants, dispatcher);
+                    }
+
+                    // euler scheduler step
+                    {
+                        const size_t n = x_gpu.total() / 4;
+                        const float dt = sigmas[z + 1] - sigmas[z];
+
+                        std::vector<ncnn::VkMat> bindings(2);
+                        bindings[0] = x_gpu;
+                        bindings[1] = unified_final_gpu;
+
+                        std::vector<ncnn::vk_constant_type> constants(2);
+                        constants[0].u32 = n;
+                        constants[1].f = dt;
+
+                        ncnn::VkMat dispatcher;
+                        dispatcher.w = n;
+                        dispatcher.h = 1;
+                        dispatcher.c = 1;
+                        cmd.record_pipeline(zimage_euler_step, bindings, constants, dispatcher);
+                    }
+
+                    cmd.submit_and_wait();
+                }
+                else
+                {
+                    // all_x_embedder
+                    ncnn::Mat x_embed;
+                    all_x_embedder.process(x, x_embed);
+
+                    // noise_refiner
+                    ncnn::Mat x_embed_refine;
+                    noise_refiner.process(x_embed, x_cos, x_sin, t_embed, x_embed_refine);
+
+                    // concat x_embed_refine and cap_refine
+                    ncnn::Mat unified_embed;
+                    ZImage::concat_along_h(x_embed_refine, cap_refine, unified_embed);
+
+                    ncnn::Mat neg_unified_embed;
+                    if (apply_cfg)
+                    {
+                        ZImage::concat_along_h(x_embed_refine, neg_cap_refine, neg_unified_embed);
+                    }
+
+                    // unified
+                    ncnn::Mat unified;
+                    unified_refiner.process(unified_embed, unified_cos, unified_sin, t_embed, unified);
+
+                    ncnn::Mat neg_unified;
+                    if (apply_cfg)
+                    {
+                        unified_refiner.process(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified);
+                    }
+
+                    // all_final_layer
+                    ncnn::Mat unified_final;
+                    all_final_layer.process(unified, t_embed, unified_final);
+
+                    ncnn::Mat neg_unified_final;
+                    if (apply_cfg)
+                    {
+                        all_final_layer.process(neg_unified, t_embed, neg_unified_final);
+                    }
+
+                    if (apply_cfg)
+                    {
+                        // apply cfg
+                        const int total = x.total();
+                        for (int i = 0; i < total; i++)
+                        {
+                            float pos = unified_final[i];
+                            float neg = neg_unified_final[i];
+
+                            unified_final[i] = pos + guidance_scale * (pos - neg);
+                        }
+                    }
+
+                    // euler scheduler step
+                    {
+                        const float dt = sigmas[z + 1] - sigmas[z];
+
+                        const int total = x.total();
+                        for (int i = 0; i < total; i++)
+                        {
+                            x[i] = x[i] - dt * unified_final[i];
+                        }
                     }
                 }
 
@@ -571,6 +816,18 @@ int main(int argc, char** argv)
                 {
                     fprintf(stderr, "step %d/%d done\n", z + 1, steps);
                 }
+            }
+
+            // download x
+            if (vkdev)
+            {
+                ncnn::VkCompute cmd(vkdev);
+
+                ncnn::Mat tmp;
+                cmd.record_download(x_gpu, tmp, opt);
+                cmd.submit_and_wait();
+
+                ncnn::convert_packing(tmp, x, 1, opt);
             }
 
             // unpatchify
