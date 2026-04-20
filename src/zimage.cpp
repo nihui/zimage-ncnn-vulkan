@@ -365,10 +365,47 @@ void get_optimal_tile_size(int width, int height, int max_tile_area, int* tile_w
     *tile_height = best_th;
 }
 
-Tokenizer::Tokenizer(const path_t& model) : bpe(BpeTokenizer::LoadFromFiles(
-    sanitize_filepath(model + PATHSTR("/../z-image-turbo/vocab.txt")),
-    sanitize_filepath(model + PATHSTR("/../z-image-turbo/merges.txt")),
-    SpecialTokensConfig{}, false, true, true))
+static path_t resolve_path(const path_t& root, const path_t& search_keyword, const path_t& fallback_dir = path_t())
+{
+    std::vector<path_t> filenames;
+    if (list_directory(root, filenames) == 0)
+    {
+        for (const auto& filename : filenames)
+        {
+            if (filename.find(search_keyword) != path_t::npos)
+                return sanitize_filepath(root + PATHSTR("/") + filename);
+        }
+    }
+
+    if (!fallback_dir.empty())
+    {
+        path_t parent = root + fallback_dir;
+        if (list_directory(sanitize_filepath(parent), filenames) == 0)
+        {
+            for (const auto& filename : filenames)
+            {
+                if (filename.find(search_keyword) != path_t::npos)
+                    return sanitize_filepath(parent + PATHSTR("/") + filename);
+            }
+        }
+    }
+
+#if _WIN32
+    fwprintf(stderr, L"resolve_path failed: %ls\n", search_keyword.c_str());
+#else
+    fprintf(stderr, "resolve_path failed: %s\n", search_keyword.c_str());
+#endif
+
+    return path_t(); 
+}
+
+Tokenizer::Tokenizer(const path_t& model) : bpe(
+    BpeTokenizer::LoadFromFiles(
+        resolve_path(model, PATHSTR("vocab.txt"), PATHSTR("/../z-image-turbo")),
+        resolve_path(model, PATHSTR("merges.txt"), PATHSTR("/../z-image-turbo")),
+        SpecialTokensConfig{}, false, true, true
+    )
+)
 {
     bpe.AddAdditionalSpecialToken("<|endoftext|>");
     bpe.AddAdditionalSpecialToken("<|im_start|>");
@@ -411,10 +448,8 @@ int Tokenizer::encode(const path_t& prompt, std::vector<int>& ids) const
 int TextEncoder::load(const path_t& model, const ncnn::Option& opt)
 {
     // share the same text_encoder
-    path_t parampath = model + PATHSTR("/../z-image-turbo/z_image_turbo_text_encoder.ncnn.param");
-    path_t modelpath = model + PATHSTR("/../z-image-turbo/z_image_turbo_text_encoder.ncnn.bin");
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("text_encoder.ncnn.param"), PATHSTR("/../z-image-turbo"));
+    path_t modelpath = resolve_path(model, PATHSTR("text_encoder.ncnn.bin"), PATHSTR("/../z-image-turbo"));
 
     text_encoder.opt = opt;
     text_encoder.load_param(parampath.c_str());
@@ -491,20 +526,8 @@ int TextEncoder::process(const std::vector<int>& input_ids, ncnn::Mat& cap)
 
 int CapEmbedder::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath;
-    path_t modelpath;
-    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_turbo_transformer_cap_embedder.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_turbo_transformer_cap_embedder.ncnn.bin");
-    }
-    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_transformer_cap_embedder.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_transformer_cap_embedder.ncnn.bin");
-    }
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("transformer_cap_embedder.ncnn.param"));
+    path_t modelpath = resolve_path(model, PATHSTR("transformer_cap_embedder.ncnn.bin"));
 
     cap_embedder.opt = opt;
     cap_embedder.load_param(parampath.c_str());
@@ -526,20 +549,8 @@ int CapEmbedder::process(const ncnn::Mat& cap, ncnn::Mat& cap_embed)
 
 int ContextRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath;
-    path_t modelpath;
-    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_turbo_transformer_context_refiner.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_turbo_transformer_context_refiner.ncnn.bin");
-    }
-    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_transformer_context_refiner.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_transformer_context_refiner.ncnn.bin");
-    }
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("transformer_context_refiner.ncnn.param"));
+    path_t modelpath = resolve_path(model, PATHSTR("transformer_context_refiner.ncnn.bin"));
 
     context_refiner.opt = opt;
     context_refiner.load_param(parampath.c_str());
@@ -563,20 +574,8 @@ int ContextRefiner::process(const ncnn::Mat& cap_embed, const ncnn::Mat& cap_cos
 
 int TEmbedder::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath;
-    path_t modelpath;
-    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_turbo_transformer_t_embedder.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_turbo_transformer_t_embedder.ncnn.bin");
-    }
-    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_transformer_t_embedder.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_transformer_t_embedder.ncnn.bin");
-    }
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("transformer_t_embedder.ncnn.param"));
+    path_t modelpath = resolve_path(model, PATHSTR("transformer_t_embedder.ncnn.bin"));
 
     t_embedder.opt = opt;
     t_embedder.load_param(parampath.c_str());
@@ -608,20 +607,8 @@ int TEmbedder::process(const std::vector<float>& timesteps, ncnn::Mat& t_embeds)
 
 int AllXEmbedder::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath;
-    path_t modelpath;
-    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_turbo_transformer_all_x_embedder.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_turbo_transformer_all_x_embedder.ncnn.bin");
-    }
-    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_transformer_all_x_embedder.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_transformer_all_x_embedder.ncnn.bin");
-    }
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("transformer_all_x_embedder.ncnn.param"));
+    path_t modelpath = resolve_path(model, PATHSTR("transformer_all_x_embedder.ncnn.bin"));
 
     all_x_embedder.opt = opt;
     all_x_embedder.load_param(parampath.c_str());
@@ -643,20 +630,8 @@ int AllXEmbedder::process(const ncnn::Mat& x, ncnn::Mat& x_embed)
 
 int NoiseRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath;
-    path_t modelpath;
-    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_turbo_transformer_noise_refiner.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_turbo_transformer_noise_refiner.ncnn.bin");
-    }
-    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_transformer_noise_refiner.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_transformer_noise_refiner.ncnn.bin");
-    }
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("transformer_noise_refiner.ncnn.param"));
+    path_t modelpath = resolve_path(model, PATHSTR("transformer_noise_refiner.ncnn.bin"));
 
     noise_refiner.opt = opt;
     noise_refiner.load_param(parampath.c_str());
@@ -681,20 +656,8 @@ int NoiseRefiner::process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, cons
 
 int UnifiedRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath;
-    path_t modelpath;
-    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_turbo_transformer_unified.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_turbo_transformer_unified.ncnn.bin");
-    }
-    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_transformer_unified.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_transformer_unified.ncnn.bin");
-    }
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("transformer_unified.ncnn.param"));
+    path_t modelpath = resolve_path(model, PATHSTR("transformer_unified.ncnn.bin"));
 
     unified_refiner.opt = opt;
     unified_refiner.load_param(parampath.c_str());
@@ -719,20 +682,8 @@ int UnifiedRefiner::process(const ncnn::Mat& unified_embed, const ncnn::Mat& uni
 
 int AllFinalLayer::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath;
-    path_t modelpath;
-    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_turbo_transformer_all_final_layer.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_turbo_transformer_all_final_layer.ncnn.bin");
-    }
-    else // if (model.find(PATHSTR("z-image")) != path_t::npos)
-    {
-        parampath = model + PATHSTR("/z_image_transformer_all_final_layer.ncnn.param");
-        modelpath = model + PATHSTR("/z_image_transformer_all_final_layer.ncnn.bin");
-    }
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("transformer_all_final_layer.ncnn.param"));
+    path_t modelpath = resolve_path(model, PATHSTR("transformer_all_final_layer.ncnn.bin"));
 
     all_final_layer.opt = opt;
     all_final_layer.load_param(parampath.c_str());
@@ -993,10 +944,8 @@ int VAETiledGroupNorm::forward_inplace(ncnn::Mat& bottom_top_blob, const ncnn::O
 int VAE::load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt)
 {
     // share the same vae
-    path_t parampath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae.ncnn.param");
-    path_t modelpath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae.ncnn.bin");
-    parampath = sanitize_filepath(parampath);
-    modelpath = sanitize_filepath(modelpath);
+    path_t parampath = resolve_path(model, PATHSTR("vae.ncnn.param"), PATHSTR("/../z-image-turbo"));
+    path_t modelpath = resolve_path(model, PATHSTR("vae.ncnn.bin"), PATHSTR("/../z-image-turbo"));
 
     vae.opt = opt;
     if (use_vae_tiled)
