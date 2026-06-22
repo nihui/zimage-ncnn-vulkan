@@ -150,9 +150,11 @@ private:
 class VAEEncoder
 {
 public:
-    int load(const path_t& model, const ncnn::Option& opt);
+    int load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt);
 
     int process(const ncnn::Mat& image, ncnn::Mat& latent) const;
+
+    int process_tiled(const ncnn::Mat& image, int tile_width, int tile_height, ncnn::Mat& latent) const;
 
 private:
     ncnn::Net vae_encoder;

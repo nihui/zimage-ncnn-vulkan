@@ -59,6 +59,8 @@ private:
         const ncnn::Option& opt,
         int width,
         int height,
+        int vae_tile_width,
+        int vae_tile_height,
         bool input_enabled,
         const ncnn::Mat& source_canvas,
         const ncnn::Mat& paint_mask_pixels,

@@ -369,6 +369,8 @@ int LanPaintPipeline::encode_input(
     const ncnn::Option& opt,
     int width,
     int height,
+    int vae_tile_width,
+    int vae_tile_height,
     bool input_enabled,
     const ncnn::Mat& source_canvas,
     const ncnn::Mat& paint_mask_pixels,
@@ -383,14 +385,23 @@ int LanPaintPipeline::encode_input(
     ncnn::Mat source_image_float;
     image_to_ncnn_rgb_float(source_canvas, source_image_float);
 
-    ZImage::VAEEncoder vae_encoder;
-    vae_encoder.load(model, opt);
-    vae_encoder.process(source_image_float, source_latent);
+    const bool use_vae_tiled = vae_tile_width < width || vae_tile_height < height;
 
-    if (source_latent.w != width / 8 || source_latent.h != height / 8)
+    ZImage::VAEEncoder vae_encoder;
+    vae_encoder.load(model, use_vae_tiled, opt);
+    if (use_vae_tiled)
     {
-        fprintf(stderr, "vae encoder output size mismatch, got %d x %d expected %d x %d\n",
-                source_latent.w, source_latent.h, width / 8, height / 8);
+        vae_encoder.process_tiled(source_image_float, vae_tile_width, vae_tile_height, source_latent);
+    }
+    else
+    {
+        vae_encoder.process(source_image_float, source_latent);
+    }
+
+    if (source_latent.w != width / 8 || source_latent.h != height / 8 || source_latent.c != 16)
+    {
+        fprintf(stderr, "vae encoder output size mismatch, got %d x %d x %d expected %d x %d x 16\n",
+                source_latent.w, source_latent.h, source_latent.c, width / 8, height / 8);
         return -1;
     }
 
@@ -790,7 +801,7 @@ int LanPaintPipeline::generate() const
         noise_latents[b] = latents[b].clone();
     }
 
-    if (encode_input(opt, width, height, input_enabled, source_canvas, paint_mask_pixels, source_latent, source_x, paint_mask_x, known_mask_x) != 0)
+    if (encode_input(opt, width, height, vae_tile_width, vae_tile_height, input_enabled, source_canvas, paint_mask_pixels, source_latent, source_x, paint_mask_x, known_mask_x) != 0)
         return -1;
 
     const int patch_size = 2;
