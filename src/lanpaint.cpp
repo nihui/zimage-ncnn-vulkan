@@ -31,6 +31,32 @@ static float mask_pixel_value(const ncnn::Mat& image, int x, int y)
     return v > 127 * 3 ? 1.f : 0.f;
 }
 
+static float outpaint_inner_overlap_value(int x, int y, int image_w, int image_h, const int outpaint[4], int overlap)
+{
+    if (overlap <= 0)
+        return 0.f;
+
+    const int left = outpaint[0];
+    const int top = outpaint[1];
+    const int right = left + image_w - 1;
+    const int bottom = top + image_h - 1;
+
+    int distance = overlap;
+    if (outpaint[0] > 0)
+        distance = std::min(distance, x - left);
+    if (outpaint[1] > 0)
+        distance = std::min(distance, y - top);
+    if (outpaint[2] > 0)
+        distance = std::min(distance, right - x);
+    if (outpaint[3] > 0)
+        distance = std::min(distance, bottom - y);
+
+    if (distance >= overlap)
+        return 0.f;
+
+    return 1.f;
+}
+
 static void image_to_ncnn_rgb_float(const ncnn::Mat& image, ncnn::Mat& out)
 {
     out.create(image.w, image.h, 3);
@@ -291,7 +317,7 @@ int LanPaintPipeline::prepare_input(int& width, int& height, bool& input_enabled
         }
 
         source_canvas.create(canvas_w, canvas_h, (size_t)3u, 3);
-        memset(source_canvas.data, 127, (size_t)canvas_w * canvas_h * 3);
+        memset(source_canvas.data, 0, (size_t)canvas_w * canvas_h * 3);
 
         paint_mask_pixels.create(canvas_w, canvas_h);
         paint_mask_pixels.fill(1.f);
@@ -303,6 +329,7 @@ int LanPaintPipeline::prepare_input(int& width, int& height, bool& input_enabled
         }
 
         const int src_c = input_image.elempack;
+        const int outpaint_overlap = std::min(20, std::max(0, std::min(input_image.w, input_image.h) / 2));
         for (int y = 0; y < input_image.h; y++)
         {
             for (int x = 0; x < input_image.w; x++)
@@ -315,9 +342,9 @@ int LanPaintPipeline::prepare_input(int& width, int& height, bool& input_enabled
                 dst[1] = src_c >= 2 ? src[1] : src[0];
                 dst[2] = src_c >= 3 ? src[2] : src[0];
 
-                float paint = 0.f;
+                float paint = outpaint_inner_overlap_value(dx, dy, input_image.w, input_image.h, outpaint, outpaint_overlap);
                 if (has_mask)
-                    paint = mask_pixel_value(mask_image, x, y);
+                    paint = std::max(paint, mask_pixel_value(mask_image, x, y));
                 paint_mask_pixels.row(dy)[dx] = paint;
             }
         }
@@ -616,28 +643,126 @@ int LanPaintPipeline::sample(
 
 void LanPaintPipeline::composite_known_pixels(ncnn::Mat& outimage, const ncnn::Mat& source_canvas, const ncnn::Mat& paint_mask_pixels) const
 {
+    if (outimage.w != source_canvas.w || outimage.h != source_canvas.h)
+        return;
+
+    const int blend_overlap = 9;
+    const int blend_radius = blend_overlap / 2;
+
+    ncnn::Mat dilated_mask(source_canvas.w, source_canvas.h);
+    for (int y = 0; y < source_canvas.h; y++)
+    {
+        float* dstrow = dilated_mask.row(y);
+        for (int x = 0; x < source_canvas.w; x++)
+        {
+            float value = 0.f;
+            for (int ky = -blend_radius; ky <= blend_radius && value == 0.f; ky++)
+            {
+                const int sy = y + ky;
+                if (sy < 0 || sy >= source_canvas.h)
+                    continue;
+
+                const float* srcrow = paint_mask_pixels.row(sy);
+                for (int kx = -blend_radius; kx <= blend_radius; kx++)
+                {
+                    const int sx = x + kx;
+                    if (sx < 0 || sx >= source_canvas.w)
+                        continue;
+
+                    if (srcrow[sx] > 0.5f)
+                    {
+                        value = 1.f;
+                        break;
+                    }
+                }
+            }
+            dstrow[x] = value;
+        }
+    }
+
+    float kernel[blend_overlap * blend_overlap];
+    {
+        const float sigma = (float)(blend_overlap - 1) / 4.f;
+        const float denom = 2.f * sigma * sigma;
+        float sum = 0.f;
+        for (int y = 0; y < blend_overlap; y++)
+        {
+            const int yy = y - blend_radius;
+            for (int x = 0; x < blend_overlap; x++)
+            {
+                const int xx = x - blend_radius;
+                const float v = expf(-((float)(xx * xx + yy * yy)) / denom);
+                kernel[y * blend_overlap + x] = v;
+                sum += v;
+            }
+        }
+
+        for (int i = 0; i < blend_overlap * blend_overlap; i++)
+            kernel[i] /= sum;
+    }
+
+    ncnn::Mat blend_mask(source_canvas.w, source_canvas.h);
+    for (int y = 0; y < source_canvas.h; y++)
+    {
+        float* dstrow = blend_mask.row(y);
+        const float* paintrow = paint_mask_pixels.row(y);
+        for (int x = 0; x < source_canvas.w; x++)
+        {
+            if (paintrow[x] > 0.5f)
+            {
+                dstrow[x] = 1.f;
+                continue;
+            }
+
+            float sum = 0.f;
+            for (int ky = -blend_radius; ky <= blend_radius; ky++)
+            {
+                const int sy = y + ky;
+                if (sy < 0 || sy >= source_canvas.h)
+                    continue;
+
+                const float* srcrow = dilated_mask.row(sy);
+                for (int kx = -blend_radius; kx <= blend_radius; kx++)
+                {
+                    const int sx = x + kx;
+                    if (sx < 0 || sx >= source_canvas.w)
+                        continue;
+
+                    sum += srcrow[sx] * kernel[(ky + blend_radius) * blend_overlap + (kx + blend_radius)];
+                }
+            }
+
+            dstrow[x] = sum;
+        }
+    }
+
     const int source_c = source_canvas.elempack;
     unsigned char* outptr = (unsigned char*)outimage.data;
 
     for (int y = 0; y < source_canvas.h; y++)
     {
-        const float* maskrow = paint_mask_pixels.row(y);
+        const float* maskrow = blend_mask.row(y);
         for (int x = 0; x < source_canvas.w; x++)
         {
-            if (maskrow[x] > 0.5f)
+            const float paint = maskrow[x];
+            if (paint >= 1.f)
                 continue;
 
             const unsigned char* src = (const unsigned char*)source_canvas.data + ((size_t)y * source_canvas.w + x) * source_c;
             unsigned char* dst = outptr + ((size_t)y * source_canvas.w + x) * 3;
 #if _WIN32
-            dst[0] = source_c >= 3 ? src[2] : src[0];
-            dst[1] = source_c >= 2 ? src[1] : src[0];
-            dst[2] = src[0];
+            const unsigned char src0 = source_c >= 3 ? src[2] : src[0];
+            const unsigned char src1 = source_c >= 2 ? src[1] : src[0];
+            const unsigned char src2 = src[0];
 #else
-            dst[0] = src[0];
-            dst[1] = source_c >= 2 ? src[1] : src[0];
-            dst[2] = source_c >= 3 ? src[2] : src[0];
+            const unsigned char src0 = src[0];
+            const unsigned char src1 = source_c >= 2 ? src[1] : src[0];
+            const unsigned char src2 = source_c >= 3 ? src[2] : src[0];
 #endif
+            const float known = 1.f - paint;
+            dst[0] = (unsigned char)(dst[0] * paint + src0 * known + 0.5f);
+            dst[1] = (unsigned char)(dst[1] * paint + src1 * known + 0.5f);
+            dst[2] = (unsigned char)(dst[2] * paint + src2 * known + 0.5f);
         }
     }
 }

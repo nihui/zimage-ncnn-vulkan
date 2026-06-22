@@ -125,7 +125,7 @@ int main(int argc, char** argv)
     lanpaint_pipeline.lanpaint_friction = 15.f;
     lanpaint_pipeline.lanpaint_early_stop = 1;
     lanpaint_pipeline.lanpaint_prompt_first = false;
-    lanpaint_pipeline.preserve_known = false;
+    lanpaint_pipeline.preserve_known = true;
     lanpaint_pipeline.outpaint[0] = 0;
     lanpaint_pipeline.outpaint[1] = 0;
     lanpaint_pipeline.outpaint[2] = 0;
