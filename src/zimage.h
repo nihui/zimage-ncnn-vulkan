@@ -51,7 +51,7 @@ class TextEncoder
 public:
     int load(const path_t& model, const ncnn::Option& opt);
 
-    int process(const std::vector<int>& input_ids, ncnn::Mat& cap);
+    int process(const std::vector<int>& input_ids, ncnn::Mat& cap) const;
 
 private:
     ncnn::Net text_encoder;
@@ -62,7 +62,7 @@ class CapEmbedder
 public:
     int load(const path_t& model, const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& cap, ncnn::Mat& cap_embed);
+    int process(const ncnn::Mat& cap, ncnn::Mat& cap_embed) const;
 
 private:
     ncnn::Net cap_embedder;
@@ -73,7 +73,7 @@ class ContextRefiner
 public:
     int load(const path_t& model, const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& cap_embed, const ncnn::Mat& cap_cos, const ncnn::Mat& cap_sin, ncnn::Mat& cap_refine);
+    int process(const ncnn::Mat& cap_embed, const ncnn::Mat& cap_cos, const ncnn::Mat& cap_sin, ncnn::Mat& cap_refine) const;
 
 private:
     ncnn::Net context_refiner;
@@ -84,7 +84,7 @@ class TEmbedder
 public:
     int load(const path_t& model, const ncnn::Option& opt);
 
-    int process(const std::vector<float>& timesteps, ncnn::Mat& t_embeds);
+    int process(const std::vector<float>& timesteps, ncnn::Mat& t_embeds) const;
 
 private:
     ncnn::Net t_embedder;
@@ -95,7 +95,7 @@ class AllXEmbedder
 public:
     int load(const path_t& model, const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& x, ncnn::Mat& x_embed);
+    int process(const ncnn::Mat& x, ncnn::Mat& x_embed) const;
 
 private:
     ncnn::Net all_x_embedder;
@@ -106,7 +106,7 @@ class NoiseRefiner
 public:
     int load(const path_t& model, const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, const ncnn::Mat& x_sin, const ncnn::Mat& t_embed, ncnn::Mat& x_embed_refine);
+    int process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, const ncnn::Mat& x_sin, const ncnn::Mat& t_embed, ncnn::Mat& x_embed_refine) const;
 
 private:
     ncnn::Net noise_refiner;
@@ -117,7 +117,7 @@ class UnifiedRefiner
 public:
     int load(const path_t& model, const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& unified_embed, const ncnn::Mat& unified_cos, const ncnn::Mat& unified_sin, const ncnn::Mat& t_embed, ncnn::Mat& unified);
+    int process(const ncnn::Mat& unified_embed, const ncnn::Mat& unified_cos, const ncnn::Mat& unified_sin, const ncnn::Mat& t_embed, ncnn::Mat& unified) const;
 
 private:
     ncnn::Net unified_refiner;
@@ -128,23 +128,34 @@ class AllFinalLayer
 public:
     int load(const path_t& model, const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, ncnn::Mat& unified_final);
+    int process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, ncnn::Mat& unified_final) const;
 
 private:
     ncnn::Net all_final_layer;
 };
 
-class VAE
+class VAEDecoder
 {
 public:
     int load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt);
 
-    int process(const ncnn::Mat& latent, ncnn::Mat& outimage);
+    int process(const ncnn::Mat& latent, ncnn::Mat& outimage) const;
 
-    int process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height, ncnn::Mat& outimage);
+    int process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height, ncnn::Mat& outimage) const;
 
 private:
-    ncnn::Net vae;
+    ncnn::Net vae_decoder;
+};
+
+class VAEEncoder
+{
+public:
+    int load(const path_t& model, const ncnn::Option& opt);
+
+    int process(const ncnn::Mat& image, ncnn::Mat& latent) const;
+
+private:
+    ncnn::Net vae_encoder;
 };
 
 } // namespace ZImage

@@ -2,6 +2,7 @@
 #define FILESYSTEM_UTILS_H
 
 #include <stdio.h>
+#include <string.h>
 #include <vector>
 #include <string>
 #include <algorithm>
