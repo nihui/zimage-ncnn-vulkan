@@ -88,6 +88,8 @@ static void print_usage()
     fprintf(stdout, "  -i input-image       input image for inpaint (optional)\n");
     fprintf(stdout, "  -k mask-image        inpaint mask, white=paint black=preserve (optional)\n");
     fprintf(stdout, "  -x l,t,r,b           outpaint by expanding input canvas (optional)\n");
+    fprintf(stdout, "  -c control-image     control image for ControlNet (optional)\n");
+    fprintf(stdout, "  -w control-scale     ControlNet scale (default=1.0)\n");
     fprintf(stdout, "  -s image-size        image resolution (default=1024,1024)\n");
     fprintf(stdout, "  -l steps             denoise steps (default=auto)\n");
     fprintf(stdout, "  -r random-seed       random seed (default=rand)\n");
@@ -137,7 +139,7 @@ int main(int argc, char** argv)
 #if _WIN32
         setlocale(LC_ALL, "");
         wchar_t opt;
-        while ((opt = getopt(argc, argv, L"p:n:o:i:k:x:s:l:r:m:g:b:h")) != (wchar_t)-1)
+        while ((opt = getopt(argc, argv, L"p:n:o:i:k:x:c:w:s:l:r:m:g:b:h")) != (wchar_t)-1)
         {
             switch (opt)
             {
@@ -172,6 +174,14 @@ int main(int argc, char** argv)
                 lanpaint_pipeline.outpaint_set = true;
                 break;
             }
+            case L'c':
+                zimage_pipeline.controlpath = optarg;
+                lanpaint_pipeline.controlpath = zimage_pipeline.controlpath;
+                break;
+            case L'w':
+                zimage_pipeline.control_scale = (float)_wtof(optarg);
+                lanpaint_pipeline.control_scale = zimage_pipeline.control_scale;
+                break;
             case L's':
             {
                 std::vector<int> list = parse_optarg_int_array(optarg);
@@ -217,7 +227,7 @@ int main(int argc, char** argv)
         }
 #else // _WIN32
         int opt;
-        while ((opt = getopt(argc, argv, "p:n:o:i:k:x:s:l:r:m:g:b:h")) != -1)
+        while ((opt = getopt(argc, argv, "p:n:o:i:k:x:c:w:s:l:r:m:g:b:h")) != -1)
         {
             switch (opt)
             {
@@ -252,6 +262,14 @@ int main(int argc, char** argv)
                 lanpaint_pipeline.outpaint_set = true;
                 break;
             }
+            case 'c':
+                zimage_pipeline.controlpath = optarg;
+                lanpaint_pipeline.controlpath = zimage_pipeline.controlpath;
+                break;
+            case 'w':
+                zimage_pipeline.control_scale = (float)atof(optarg);
+                lanpaint_pipeline.control_scale = zimage_pipeline.control_scale;
+                break;
             case 's':
             {
                 std::vector<int> list = parse_optarg_int_array(optarg);

@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE release CACHE STRING "Choose the type of build" FORCE)
 endif()
 
-add_executable(zimage-ncnn-vulkan main.cpp zimage_pipeline.cpp lanpaint.cpp image_io.cpp zimage.cpp bpe_tokenizer.cpp)
+add_executable(zimage-ncnn-vulkan main.cpp zimage_pipeline.cpp lanpaint.cpp image_io.cpp zimage.cpp zimage_control.cpp bpe_tokenizer.cpp)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/deps_ncnn.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/deps_codec.cmake)

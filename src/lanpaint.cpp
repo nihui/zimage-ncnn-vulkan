@@ -207,6 +207,126 @@ static int predict_velocity_pair(
     return 0;
 }
 
+static int predict_velocity_pair_controlled(
+    const ZImage::AllXEmbedder& all_x_embedder,
+    const ZImage::NoiseRefiner& noise_refiner,
+    const ZImage::UnifiedRefiner& unified_refiner,
+    const ZImage::AllFinalLayer& all_final_layer,
+    const ZImage::ControlRefiner& control_refiner,
+    const ZImage::ControlUnified& control_unified,
+    const ncnn::Mat& control_x,
+    const ncnn::Mat& x,
+    const ncnn::Mat& x_cos,
+    const ncnn::Mat& x_sin,
+    const ncnn::Mat& neg_x_cos,
+    const ncnn::Mat& neg_x_sin,
+    const ncnn::Mat& t_embed,
+    const ncnn::Mat& cap_refine,
+    const ncnn::Mat& unified_cos,
+    const ncnn::Mat& unified_sin,
+    const ncnn::Mat& neg_cap_refine,
+    const ncnn::Mat& neg_unified_cos,
+    const ncnn::Mat& neg_unified_sin,
+    bool apply_cfg,
+    float guidance_scale,
+    float control_scale,
+    bool want_big,
+    float big_guidance_scale,
+    ncnn::Mat& velocity,
+    ncnn::Mat& velocity_big)
+{
+    ncnn::Mat x_embed;
+    all_x_embedder.process(x, x_embed);
+
+    ncnn::Mat hint0;
+    ncnn::Mat hint1;
+    ncnn::Mat control_context;
+    if (control_refiner.process(control_x, x_embed, x_cos, x_sin, t_embed, hint0, hint1, control_context) != 0)
+        return -1;
+
+    ncnn::Mat x_embed_refine;
+    if (noise_refiner.process_controlled(x_embed, x_cos, x_sin, t_embed, hint0, hint1, control_scale, x_embed_refine) != 0)
+        return -1;
+
+    ncnn::Mat neg_x_embed_refine;
+    ncnn::Mat neg_control_context;
+    if (apply_cfg)
+    {
+        ncnn::Mat neg_hint0;
+        ncnn::Mat neg_hint1;
+        if (control_refiner.process(control_x, x_embed, neg_x_cos, neg_x_sin, t_embed, neg_hint0, neg_hint1, neg_control_context) != 0)
+            return -1;
+        if (noise_refiner.process_controlled(x_embed, neg_x_cos, neg_x_sin, t_embed, neg_hint0, neg_hint1, control_scale, neg_x_embed_refine) != 0)
+            return -1;
+    }
+
+    ncnn::Mat unified_embed;
+    ZImage::concat_along_h(x_embed_refine, cap_refine, unified_embed);
+
+    ncnn::Mat control_unified_embed;
+    ZImage::concat_along_h(control_context, cap_refine, control_unified_embed);
+
+    ncnn::Mat unified_hint0;
+    ncnn::Mat unified_hint10;
+    ncnn::Mat unified_hint20;
+    if (control_unified.process(control_unified_embed, unified_embed, unified_cos, unified_sin, t_embed, unified_hint0, unified_hint10, unified_hint20) != 0)
+        return -1;
+
+    ncnn::Mat unified;
+    if (unified_refiner.process_controlled(unified_embed, unified_cos, unified_sin, t_embed, unified_hint0, unified_hint10, unified_hint20, control_scale, unified) != 0)
+        return -1;
+
+    ncnn::Mat pos_final;
+    all_final_layer.process(unified, t_embed, pos_final);
+
+    ncnn::Mat neg_final;
+    if (apply_cfg)
+    {
+        ncnn::Mat neg_unified_embed;
+        ZImage::concat_along_h(neg_x_embed_refine, neg_cap_refine, neg_unified_embed);
+
+        ncnn::Mat neg_control_unified_embed;
+        ZImage::concat_along_h(neg_control_context, neg_cap_refine, neg_control_unified_embed);
+
+        ncnn::Mat neg_unified_hint0;
+        ncnn::Mat neg_unified_hint10;
+        ncnn::Mat neg_unified_hint20;
+        if (control_unified.process(neg_control_unified_embed, neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified_hint0, neg_unified_hint10, neg_unified_hint20) != 0)
+            return -1;
+
+        ncnn::Mat neg_unified;
+        if (unified_refiner.process_controlled(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified_hint0, neg_unified_hint10, neg_unified_hint20, control_scale, neg_unified) != 0)
+            return -1;
+
+        all_final_layer.process(neg_unified, t_embed, neg_final);
+    }
+
+    velocity.create(x.w, x.h);
+    if (want_big)
+        velocity_big.create(x.w, x.h);
+
+    const int total = x.total();
+    for (int i = 0; i < total; i++)
+    {
+        const float pos = pos_final[i];
+        if (apply_cfg)
+        {
+            const float neg = neg_final[i];
+            velocity[i] = pos + guidance_scale * (pos - neg);
+            if (want_big)
+                velocity_big[i] = pos + big_guidance_scale * (pos - neg);
+        }
+        else
+        {
+            velocity[i] = pos;
+            if (want_big)
+                velocity_big[i] = pos;
+        }
+    }
+
+    return 0;
+}
+
 int LanPaintPipeline::load()
 {
     if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
@@ -449,11 +569,14 @@ int LanPaintPipeline::sample(
     const ncnn::Mat& source_x,
     const ncnn::Mat& paint_mask_x,
     const ncnn::Mat& known_mask_x,
+    const ncnn::Mat& control_x,
     const ncnn::Option& opt,
     const std::vector<float>& sigmas,
     const ncnn::Mat& t_embeds,
     const ncnn::Mat& x_cos,
     const ncnn::Mat& x_sin,
+    const ncnn::Mat& neg_x_cos,
+    const ncnn::Mat& neg_x_sin,
     const ncnn::Mat& cap_refine,
     const ncnn::Mat& unified_cos,
     const ncnn::Mat& unified_sin,
@@ -462,6 +585,8 @@ int LanPaintPipeline::sample(
     const ncnn::Mat& neg_unified_sin,
     bool apply_cfg,
     float guidance_scale,
+    bool control_enabled,
+    float control_scale,
     int steps) const
 {
     ZImage::AllXEmbedder all_x_embedder;
@@ -475,6 +600,22 @@ int LanPaintPipeline::sample(
 
     ZImage::AllFinalLayer all_final_layer;
     all_final_layer.load(model, opt);
+
+    ZImage::ControlRefiner control_refiner;
+    ZImage::ControlUnified control_unified;
+    if (control_enabled)
+    {
+        if (control_refiner.load(model, opt) != 0)
+        {
+            fprintf(stderr, "load control refiner failed\n");
+            return -1;
+        }
+        if (control_unified.load(model, opt) != 0)
+        {
+            fprintf(stderr, "load control unified failed\n");
+            return -1;
+        }
+    }
 
     for (int b = 0; b < batch; b++)
     {
@@ -541,10 +682,23 @@ int LanPaintPipeline::sample(
 
                         ncnn::Mat velocity;
                         ncnn::Mat velocity_big;
-                        predict_velocity_pair(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
-                                              x_flow, x_cos, x_sin, t_embed, cap_refine, unified_cos, unified_sin,
-                                              neg_cap_refine, neg_unified_cos, neg_unified_sin,
-                                              apply_cfg, guidance_scale, true, big_guidance_scale, velocity, velocity_big);
+                        if (control_enabled)
+                        {
+                            if (predict_velocity_pair_controlled(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
+                                                                 control_refiner, control_unified, control_x,
+                                                                 x_flow, x_cos, x_sin, neg_x_cos, neg_x_sin, t_embed, cap_refine, unified_cos, unified_sin,
+                                                                 neg_cap_refine, neg_unified_cos, neg_unified_sin,
+                                                                 apply_cfg, guidance_scale, control_scale, true, big_guidance_scale, velocity, velocity_big) != 0)
+                                return -1;
+                        }
+                        else
+                        {
+                            if (predict_velocity_pair(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
+                                                      x_flow, x_cos, x_sin, t_embed, cap_refine, unified_cos, unified_sin,
+                                                      neg_cap_refine, neg_unified_cos, neg_unified_sin,
+                                                      apply_cfg, guidance_scale, true, big_guidance_scale, velocity, velocity_big) != 0)
+                                return -1;
+                        }
 
                         for (int i = 0; i < total; i++)
                         {
@@ -583,10 +737,23 @@ int LanPaintPipeline::sample(
                 {
                     ncnn::Mat velocity;
                     ncnn::Mat velocity_big;
-                    predict_velocity_pair(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
-                                          x, x_cos, x_sin, t_embed, cap_refine, unified_cos, unified_sin,
-                                          neg_cap_refine, neg_unified_cos, neg_unified_sin,
-                                          apply_cfg, guidance_scale, false, guidance_scale, velocity, velocity_big);
+                    if (control_enabled)
+                    {
+                        if (predict_velocity_pair_controlled(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
+                                                             control_refiner, control_unified, control_x,
+                                                             x, x_cos, x_sin, neg_x_cos, neg_x_sin, t_embed, cap_refine, unified_cos, unified_sin,
+                                                             neg_cap_refine, neg_unified_cos, neg_unified_sin,
+                                                             apply_cfg, guidance_scale, control_scale, false, guidance_scale, velocity, velocity_big) != 0)
+                            return -1;
+                    }
+                    else
+                    {
+                        if (predict_velocity_pair(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
+                                                  x, x_cos, x_sin, t_embed, cap_refine, unified_cos, unified_sin,
+                                                  neg_cap_refine, neg_unified_cos, neg_unified_sin,
+                                                  apply_cfg, guidance_scale, false, guidance_scale, velocity, velocity_big) != 0)
+                            return -1;
+                    }
 
                     for (int i = 0; i < total; i++)
                     {
@@ -616,10 +783,23 @@ int LanPaintPipeline::sample(
             {
                 ncnn::Mat velocity;
                 ncnn::Mat velocity_big;
-                predict_velocity_pair(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
-                                      x, x_cos, x_sin, t_embed, cap_refine, unified_cos, unified_sin,
-                                      neg_cap_refine, neg_unified_cos, neg_unified_sin,
-                                      apply_cfg, guidance_scale, false, guidance_scale, velocity, velocity_big);
+                if (control_enabled)
+                {
+                    if (predict_velocity_pair_controlled(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
+                                                         control_refiner, control_unified, control_x,
+                                                         x, x_cos, x_sin, neg_x_cos, neg_x_sin, t_embed, cap_refine, unified_cos, unified_sin,
+                                                         neg_cap_refine, neg_unified_cos, neg_unified_sin,
+                                                         apply_cfg, guidance_scale, control_scale, false, guidance_scale, velocity, velocity_big) != 0)
+                        return -1;
+                }
+                else
+                {
+                    if (predict_velocity_pair(all_x_embedder, noise_refiner, unified_refiner, all_final_layer,
+                                              x, x_cos, x_sin, t_embed, cap_refine, unified_cos, unified_sin,
+                                              neg_cap_refine, neg_unified_cos, neg_unified_sin,
+                                              apply_cfg, guidance_scale, false, guidance_scale, velocity, velocity_big) != 0)
+                        return -1;
+                }
 
                 const float dt = sigmas[z + 1] - sigmas[z];
                 const int total = x.total();
@@ -834,6 +1014,13 @@ int LanPaintPipeline::generate() const
         return -1;
     }
 
+    const bool control_enabled = !controlpath.empty() && control_scale != 0.f;
+    if (control_enabled && model.find(PATHSTR("z-image-turbo")) == path_t::npos)
+    {
+        fprintf(stderr, "control image currently requires z-image-turbo model\n");
+        return -1;
+    }
+
 #if _WIN32
     fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());
     fwprintf(stderr, L"negative-prompt = %ls\n", negative_prompt.c_str());
@@ -841,6 +1028,8 @@ int LanPaintPipeline::generate() const
     fwprintf(stderr, L"input-image = %ls\n", inputpath.c_str());
     fwprintf(stderr, L"mask-image = %ls\n", maskpath.c_str());
     fwprintf(stderr, L"model = %ls\n", model.c_str());
+    if (control_enabled)
+        fwprintf(stderr, L"control-image = %ls\n", controlpath.c_str());
 #else
     fprintf(stderr, "prompt = %s\n", prompt.c_str());
     fprintf(stderr, "negative-prompt = %s\n", negative_prompt.c_str());
@@ -848,12 +1037,16 @@ int LanPaintPipeline::generate() const
     fprintf(stderr, "input-image = %s\n", inputpath.c_str());
     fprintf(stderr, "mask-image = %s\n", maskpath.c_str());
     fprintf(stderr, "model = %s\n", model.c_str());
+    if (control_enabled)
+        fprintf(stderr, "control-image = %s\n", controlpath.c_str());
 #endif
     fprintf(stderr, "image-size = %d x %d\n", width, height);
     fprintf(stderr, "steps = %d\n", steps);
     fprintf(stderr, "seed = %d\n", seed);
     fprintf(stderr, "gpu-id = %d\n", loaded_gpuid);
     fprintf(stderr, "batch = %d\n", batch);
+    if (control_enabled)
+        fprintf(stderr, "control-scale = %g\n", control_scale);
     fprintf(stderr, "lanpaint = steps:%d lambda:%g step-size:%g beta:%g friction:%g early-stop:%d prompt-mode:%s preserve-known:%d\n",
             lanpaint_steps, lanpaint_lambda, lanpaint_step_size, lanpaint_beta, lanpaint_friction, lanpaint_early_stop,
             lanpaint_prompt_first ? "prompt" : "image", preserve_known ? 1 : 0);
@@ -887,6 +1080,32 @@ int LanPaintPipeline::generate() const
 #else
         fprintf(stderr, "batch generation enabled. output-path will be %s-0.%s %s-1.%s %s-2.%s ...\n", filename.c_str(), ext.c_str(), filename.c_str(), ext.c_str(), filename.c_str(), ext.c_str());
 #endif
+    }
+
+    ncnn::Mat control_x;
+    if (control_enabled)
+    {
+        ncnn::Mat control_image;
+        if (ImageIO::load_image(controlpath, control_image) != 0)
+        {
+#if _WIN32
+            fwprintf(stderr, L"load control image %ls failed\n", controlpath.c_str());
+#else
+            fprintf(stderr, "load control image %s failed\n", controlpath.c_str());
+#endif
+            return -1;
+        }
+
+        if (control_image.w != width || control_image.h != height)
+        {
+            fprintf(stderr, "control image size must match final canvas %d x %d but got %d x %d\n",
+                    width, height, control_image.w, control_image.h);
+            return -1;
+        }
+
+        const bool use_vae_tiled = vae_tile_width < width || vae_tile_height < height;
+        if (ZImage::prepare_control_x(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x) != 0)
+            return -1;
     }
 
     // tokenizer
@@ -1007,10 +1226,11 @@ int LanPaintPipeline::generate() const
         t_embedder.process(timesteps, t_embeds);
     }
 
-    sample(latents, noise_latents, input_enabled, source_x, paint_mask_x, known_mask_x, opt, sigmas, t_embeds,
-           x_cos, x_sin, cap_refine, unified_cos, unified_sin,
+    if (sample(latents, noise_latents, input_enabled, source_x, paint_mask_x, known_mask_x, control_x, opt, sigmas, t_embeds,
+           x_cos, x_sin, neg_x_cos, neg_x_sin, cap_refine, unified_cos, unified_sin,
            neg_cap_refine, neg_unified_cos, neg_unified_sin,
-           apply_cfg, guidance_scale, steps);
+           apply_cfg, guidance_scale, control_enabled, control_scale, steps) != 0)
+        return -1;
 
     // vae decode and save image
     {
