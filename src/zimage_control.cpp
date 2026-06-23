@@ -132,6 +132,23 @@ static int add_scaled(const ncnn::Mat& a, const ncnn::Mat& b, float scale, ncnn:
     return add_scaled_inplace(out, b, scale);
 }
 
+static path_t get_control_model_dir(const path_t& model)
+{
+    if (model.find(PATHSTR("z-image-control")) != path_t::npos)
+        return model;
+
+    const path_t turbo_dirname = PATHSTR("z-image-turbo");
+    const size_t turbo_pos = model.rfind(turbo_dirname);
+    if (turbo_pos != path_t::npos)
+    {
+        path_t control_model = model;
+        control_model.replace(turbo_pos, turbo_dirname.size(), PATHSTR("z-image-control"));
+        return control_model;
+    }
+
+    return model;
+}
+
 int prepare_control_x(
     const ncnn::Mat& control_image,
     const path_t& model,
@@ -206,8 +223,9 @@ int prepare_control_x(
 
 int ControlRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath = model + PATHSTR("/z_image_control_refiner.ncnn.param");
-    path_t modelpath = model + PATHSTR("/z_image_control_refiner.ncnn.bin");
+    const path_t control_model = get_control_model_dir(model);
+    path_t parampath = control_model + PATHSTR("/z_image_control_refiner.ncnn.param");
+    path_t modelpath = control_model + PATHSTR("/z_image_control_refiner.ncnn.bin");
     parampath = sanitize_filepath(parampath);
     modelpath = sanitize_filepath(modelpath);
 
@@ -250,8 +268,9 @@ int ControlRefiner::process(
 
 int ControlUnified::load(const path_t& model, const ncnn::Option& opt)
 {
-    path_t parampath = model + PATHSTR("/z_image_control_unified.ncnn.param");
-    path_t modelpath = model + PATHSTR("/z_image_control_unified.ncnn.bin");
+    const path_t control_model = get_control_model_dir(model);
+    path_t parampath = control_model + PATHSTR("/z_image_control_unified.ncnn.param");
+    path_t modelpath = control_model + PATHSTR("/z_image_control_unified.ncnn.bin");
     parampath = sanitize_filepath(parampath);
     modelpath = sanitize_filepath(modelpath);
 
