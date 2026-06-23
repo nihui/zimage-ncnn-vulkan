@@ -455,7 +455,7 @@ static void generate_rope_embed_cache(int seqlen, int embed_dim, int position_id
     }
 }
 
-int TextEncoder::process(const std::vector<int>& input_ids, ncnn::Mat& cap)
+int TextEncoder::process(const std::vector<int>& input_ids, ncnn::Mat& cap) const
 {
     const int input_id_count = (int)input_ids.size();
 
@@ -513,7 +513,7 @@ int CapEmbedder::load(const path_t& model, const ncnn::Option& opt)
     return 0;
 }
 
-int CapEmbedder::process(const ncnn::Mat& cap, ncnn::Mat& cap_embed)
+int CapEmbedder::process(const ncnn::Mat& cap, ncnn::Mat& cap_embed) const
 {
     ncnn::Extractor ex = cap_embedder.create_extractor();
 
@@ -548,7 +548,7 @@ int ContextRefiner::load(const path_t& model, const ncnn::Option& opt)
     return 0;
 }
 
-int ContextRefiner::process(const ncnn::Mat& cap_embed, const ncnn::Mat& cap_cos, const ncnn::Mat& cap_sin, ncnn::Mat& cap_refine)
+int ContextRefiner::process(const ncnn::Mat& cap_embed, const ncnn::Mat& cap_cos, const ncnn::Mat& cap_sin, ncnn::Mat& cap_refine) const
 {
     ncnn::Extractor ex = context_refiner.create_extractor();
 
@@ -585,7 +585,7 @@ int TEmbedder::load(const path_t& model, const ncnn::Option& opt)
     return 0;
 }
 
-int TEmbedder::process(const std::vector<float>& timesteps, ncnn::Mat& t_embeds)
+int TEmbedder::process(const std::vector<float>& timesteps, ncnn::Mat& t_embeds) const
 {
     const float t_scale = 1000.f;
 
@@ -630,7 +630,7 @@ int AllXEmbedder::load(const path_t& model, const ncnn::Option& opt)
     return 0;
 }
 
-int AllXEmbedder::process(const ncnn::Mat& x, ncnn::Mat& x_embed)
+int AllXEmbedder::process(const ncnn::Mat& x, ncnn::Mat& x_embed) const
 {
     ncnn::Extractor ex = all_x_embedder.create_extractor();
 
@@ -665,7 +665,7 @@ int NoiseRefiner::load(const path_t& model, const ncnn::Option& opt)
     return 0;
 }
 
-int NoiseRefiner::process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, const ncnn::Mat& x_sin, const ncnn::Mat& t_embed, ncnn::Mat& x_embed_refine)
+int NoiseRefiner::process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, const ncnn::Mat& x_sin, const ncnn::Mat& t_embed, ncnn::Mat& x_embed_refine) const
 {
     ncnn::Extractor ex = noise_refiner.create_extractor();
 
@@ -703,7 +703,7 @@ int UnifiedRefiner::load(const path_t& model, const ncnn::Option& opt)
     return 0;
 }
 
-int UnifiedRefiner::process(const ncnn::Mat& unified_embed, const ncnn::Mat& unified_cos, const ncnn::Mat& unified_sin, const ncnn::Mat& t_embed, ncnn::Mat& unified)
+int UnifiedRefiner::process(const ncnn::Mat& unified_embed, const ncnn::Mat& unified_cos, const ncnn::Mat& unified_sin, const ncnn::Mat& t_embed, ncnn::Mat& unified) const
 {
     ncnn::Extractor ex = unified_refiner.create_extractor();
 
@@ -741,7 +741,7 @@ int AllFinalLayer::load(const path_t& model, const ncnn::Option& opt)
     return 0;
 }
 
-int AllFinalLayer::process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, ncnn::Mat& unified_final)
+int AllFinalLayer::process(const ncnn::Mat& unified, const ncnn::Mat& t_embed, ncnn::Mat& unified_final) const
 {
     ncnn::Extractor ex = all_final_layer.create_extractor();
 
@@ -990,21 +990,21 @@ int VAETiledGroupNorm::forward_inplace(ncnn::Mat& bottom_top_blob, const ncnn::O
     return 0;
 }
 
-int VAE::load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt)
+int VAEDecoder::load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt)
 {
-    // share the same vae
+    // share the same vae decoder
     path_t parampath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae.ncnn.param");
     path_t modelpath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae.ncnn.bin");
     parampath = sanitize_filepath(parampath);
     modelpath = sanitize_filepath(modelpath);
 
-    vae.opt = opt;
+    vae_decoder.opt = opt;
     if (use_vae_tiled)
     {
-        vae.register_custom_layer("GroupNorm", VAETiledGroupNorm_layer_creator);
+        vae_decoder.register_custom_layer("GroupNorm", VAETiledGroupNorm_layer_creator);
     }
-    vae.load_param(parampath.c_str());
-    vae.load_model(modelpath.c_str());
+    vae_decoder.load_param(parampath.c_str());
+    vae_decoder.load_model(modelpath.c_str());
 
     g_means.resize(g_groupnorm_count);
     g_vars.resize(g_groupnorm_count);
@@ -1012,11 +1012,11 @@ int VAE::load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt)
     return 0;
 }
 
-int VAE::process(const ncnn::Mat& latent, ncnn::Mat& outimage)
+int VAEDecoder::process(const ncnn::Mat& latent, ncnn::Mat& outimage) const
 {
     g_vae_tiled_groupnorm_state = 0;
 
-    ncnn::Extractor ex = vae.create_extractor();
+    ncnn::Extractor ex = vae_decoder.create_extractor();
 
     ex.input("in0", latent);
 
@@ -1039,7 +1039,7 @@ int VAE::process(const ncnn::Mat& latent, ncnn::Mat& outimage)
     return 0;
 }
 
-int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height, ncnn::Mat& outimage)
+int VAEDecoder::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height, ncnn::Mat& outimage) const
 {
     const int latent_tile_width = tile_width / 8;
     const int latent_tile_height = tile_height / 8;
@@ -1058,7 +1058,7 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height,
     {
         g_vae_tiled_groupnorm_state = 0;
 
-        ncnn::Extractor ex = vae.create_extractor();
+        ncnn::Extractor ex = vae_decoder.create_extractor();
 
         ex.input("in0", latent_small);
 
@@ -1071,7 +1071,7 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height,
     {
         g_vae_tiled_groupnorm_state = 1;
 
-        ncnn::Extractor ex = vae.create_extractor();
+        ncnn::Extractor ex = vae_decoder.create_extractor();
 
         ex.input("in0", latent_small);
 
@@ -1117,7 +1117,7 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height,
 
                 ncnn::Mat vae_out_tile;
                 {
-                    ncnn::Extractor ex = vae.create_extractor();
+                    ncnn::Extractor ex = vae_decoder.create_extractor();
 
                     ex.input("in0", latent_tile);
 
@@ -1165,6 +1165,215 @@ int VAE::process_tiled(const ncnn::Mat& latent, int tile_width, int tile_height,
             }
         }
 
+    }
+
+    return 0;
+}
+
+int VAEEncoder::load(const path_t& model, bool use_vae_tiled, const ncnn::Option& opt)
+{
+    // share the same encoder for all model variants
+    path_t parampath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae_encoder.ncnn.param");
+    path_t modelpath = model + PATHSTR("/../z-image-turbo/z_image_turbo_vae_encoder.ncnn.bin");
+    parampath = sanitize_filepath(parampath);
+    modelpath = sanitize_filepath(modelpath);
+
+    vae_encoder.opt = opt;
+    if (use_vae_tiled)
+    {
+        vae_encoder.register_custom_layer("GroupNorm", VAETiledGroupNorm_layer_creator);
+    }
+    vae_encoder.load_param(parampath.c_str());
+    vae_encoder.load_model(modelpath.c_str());
+
+    g_means.resize(g_groupnorm_count);
+    g_vars.resize(g_groupnorm_count);
+
+    return 0;
+}
+
+static void vae_encoder_out_to_latent(const ncnn::Mat& encoder_out, ncnn::Mat& latent)
+{
+    const int latent_channels = encoder_out.c == 32 ? 16 : encoder_out.c;
+
+    latent.create(encoder_out.w, encoder_out.h, latent_channels);
+
+    const float vae_scaling_factor = 0.3611f;
+    const float vae_shift_factor = 0.1159f;
+
+    for (int q = 0; q < latent_channels; q++)
+    {
+        const ncnn::Mat src = encoder_out.channel(q);
+        ncnn::Mat dst = latent.channel(q);
+
+        for (int y = 0; y < latent.h; y++)
+        {
+            const float* srcptr = src.row(y);
+            float* dstptr = dst.row(y);
+            for (int x = 0; x < latent.w; x++)
+            {
+                dstptr[x] = (srcptr[x] - vae_shift_factor) * vae_scaling_factor;
+            }
+        }
+    }
+}
+
+int VAEEncoder::process(const ncnn::Mat& image, ncnn::Mat& latent) const
+{
+    g_vae_tiled_groupnorm_state = 0;
+
+    ncnn::Extractor ex = vae_encoder.create_extractor();
+
+    ex.input("in0", image);
+
+    ncnn::Mat encoder_out;
+    ex.extract("out0", encoder_out);
+
+    vae_encoder_out_to_latent(encoder_out, latent);
+
+    return 0;
+}
+
+static void paste_latent_tile(const ncnn::Mat& latent_tile, ncnn::Mat& latent, int out_startx, int out_starty)
+{
+    if (latent.empty())
+    {
+        return;
+    }
+
+    for (int q = 0; q < latent.c; q++)
+    {
+        const ncnn::Mat src = latent_tile.channel(q);
+        ncnn::Mat dst = latent.channel(q);
+
+        for (int y = 0; y < latent_tile.h; y++)
+        {
+            const float* srcptr = src.row(y);
+            float* dstptr = dst.row(out_starty + y) + out_startx;
+            memcpy(dstptr, srcptr, latent_tile.w * sizeof(float));
+        }
+    }
+}
+
+int VAEEncoder::process_tiled(const ncnn::Mat& image, int tile_width, int tile_height, ncnn::Mat& latent) const
+{
+    if (tile_width >= image.w && tile_height >= image.h)
+    {
+        return process(image, latent);
+    }
+
+    const int latent_width = image.w / 8;
+    const int latent_height = image.h / 8;
+    const int latent_tile_width = tile_width / 8;
+    const int latent_tile_height = tile_height / 8;
+
+    ncnn::Mat image_small;
+    ncnn::resize_bilinear(image, image_small, tile_width, tile_height);
+
+    // Estimate bottleneck attention output. Encoder param uses blob 96 for the
+    // reshaped spatial attention result, analogous to decoder blob 19.
+    ncnn::Mat attn_small;
+    ncnn::Mat attn;
+    {
+        g_vae_tiled_groupnorm_state = 0;
+
+        ncnn::Extractor ex = vae_encoder.create_extractor();
+
+        ex.input("in0", image_small);
+
+        ex.extract("96", attn_small);
+
+        ncnn::resize_bilinear(attn_small, attn, latent_width, latent_height);
+    }
+
+    // collect groupnorm mean and var
+    {
+        g_vae_tiled_groupnorm_state = 1;
+
+        ncnn::Extractor ex = vae_encoder.create_extractor();
+
+        ex.input("in0", image_small);
+
+        ex.input("96", attn_small);
+
+        ncnn::Mat stub;
+        ex.extract("out0", stub);
+    }
+
+    // tiled vae encoder with pad 32 pixels, matching 4 latent cells
+    {
+        g_vae_tiled_groupnorm_state = 2;
+
+        const int TILE_PAD = 32;
+
+        const int TILES_H = (image.h + tile_height - 1) / tile_height;
+        const int TILES_W = (image.w + tile_width - 1) / tile_width;
+
+        ncnn::Option opt;
+        opt.num_threads = 1;
+
+        for (int ty = 0; ty < TILES_H; ty++)
+        {
+            for (int tx = 0; tx < TILES_W; tx++)
+            {
+                const int target_starty = ty * tile_height;
+                const int target_endy = std::min(image.h, (ty + 1) * tile_height);
+                const int target_startx = tx * tile_width;
+                const int target_endx = std::min(image.w, (tx + 1) * tile_width);
+
+                const int image_starty = std::max(0, target_starty - TILE_PAD);
+                const int image_endy = std::min(image.h, target_endy + TILE_PAD);
+                const int image_startx = std::max(0, target_startx - TILE_PAD);
+                const int image_endx = std::min(image.w, target_endx + TILE_PAD);
+
+                const int latent_starty = image_starty / 8;
+                const int latent_endy = image_endy / 8;
+                const int latent_startx = image_startx / 8;
+                const int latent_endx = image_endx / 8;
+
+                ncnn::Mat image_tile;
+                ncnn::Mat attn_tile;
+                {
+                    ncnn::copy_cut_border(image, image_tile, image_starty, image.h - image_endy, image_startx, image.w - image_endx, opt);
+                    ncnn::copy_cut_border(attn, attn_tile, latent_starty, latent_height - latent_endy, latent_startx, latent_width - latent_endx, opt);
+                }
+
+                ncnn::Mat encoder_out_tile;
+                {
+                    ncnn::Extractor ex = vae_encoder.create_extractor();
+
+                    ex.input("in0", image_tile);
+
+                    ex.input("96", attn_tile);
+
+                    ex.extract("out0", encoder_out_tile);
+                }
+
+                ncnn::Mat latent_tile;
+                vae_encoder_out_to_latent(encoder_out_tile, latent_tile);
+
+                // crop to target roi
+                {
+                    const int actual_pad_top = (target_starty - image_starty) / 8;
+                    const int actual_pad_bottom = (image_endy - target_endy) / 8;
+                    const int actual_pad_left = (target_startx - image_startx) / 8;
+                    const int actual_pad_right = (image_endx - target_endx) / 8;
+
+                    ncnn::Mat latent_tile_roi;
+                    ncnn::copy_cut_border(latent_tile, latent_tile_roi, actual_pad_top, actual_pad_bottom, actual_pad_left, actual_pad_right, opt);
+                    latent_tile = latent_tile_roi;
+                }
+
+                if (latent.empty())
+                {
+                    latent.create(latent_width, latent_height, latent_tile.c);
+                }
+
+                const int out_starty = target_starty / 8;
+                const int out_startx = target_startx / 8;
+                paste_latent_tile(latent_tile, latent, out_startx, out_starty);
+            }
+        }
     }
 
     return 0;

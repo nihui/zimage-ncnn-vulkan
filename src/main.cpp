@@ -1,25 +1,12 @@
 // z-image implemented with ncnn library
 
-#include <float.h>
 #include <locale.h>
-#include <math.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include <vector>
-
-#if _WIN32
-// image encoder with wic
-#include "wic_image.h"
-#else // _WIN32
-// image encoder with libjpeg and libpng
-#include "jpeg_image.h"
-#include "png_image.h"
-#endif // _WIN32
-#include "webp_image.h"
 
 #if _WIN32
 #include <wchar.h>
@@ -86,13 +73,10 @@ static std::vector<int> parse_optarg_int_array(const char* optarg)
 }
 #endif // _WIN32
 
-// ncnn
-#include "mat.h"
-#include "net.h"
-
 #include "filesystem_utils.h"
 
-#include "zimage.h"
+#include "lanpaint.h"
+#include "zimage_pipeline.h"
 
 static void print_usage()
 {
@@ -101,6 +85,9 @@ static void print_usage()
     fprintf(stdout, "  -p prompt            prompt (default=rand)\n");
     fprintf(stdout, "  -n negative-prompt   negative prompt (optional)\n");
     fprintf(stdout, "  -o output-path       output image path (default=out.png)\n");
+    fprintf(stdout, "  -i input-image       input image for inpaint (optional)\n");
+    fprintf(stdout, "  -k mask-image        inpaint mask, white=paint black=preserve (optional)\n");
+    fprintf(stdout, "  -x l,t,r,b           outpaint by expanding input canvas (optional)\n");
     fprintf(stdout, "  -s image-size        image resolution (default=1024,1024)\n");
     fprintf(stdout, "  -l steps             denoise steps (default=auto)\n");
     fprintf(stdout, "  -r random-seed       random seed (default=rand)\n");
@@ -117,35 +104,74 @@ int main(int argc, char** argv)
 {
     srand(time(NULL));
 
-    path_t prompt = PATHSTR("A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.");
-    path_t negative_prompt;
-    path_t outpath = PATHSTR("out.png");
-    int width = 1024;
-    int height = 1024;
-    int steps = -1;
-    int seed = rand();
-    path_t model = PATHSTR("z-image-turbo");
-    int gpuid = 233;
-    int batch = 1;
+    ZImagePipeline zimage_pipeline;
+    LanPaintPipeline lanpaint_pipeline;
+
+    zimage_pipeline.prompt = PATHSTR("A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer.");
+    zimage_pipeline.outpath = PATHSTR("out.png");
+    zimage_pipeline.seed = rand();
+    zimage_pipeline.model = PATHSTR("z-image-turbo");
+
+    lanpaint_pipeline.prompt = zimage_pipeline.prompt;
+    lanpaint_pipeline.outpath = zimage_pipeline.outpath;
+    lanpaint_pipeline.seed = zimage_pipeline.seed;
+    lanpaint_pipeline.model = zimage_pipeline.model;
+
+    // Keep LanPaint tuning as source-level defaults until the behavior is stable.
+    lanpaint_pipeline.lanpaint_steps = 5;
+    lanpaint_pipeline.lanpaint_lambda = 16.f;
+    lanpaint_pipeline.lanpaint_step_size = 0.2f;
+    lanpaint_pipeline.lanpaint_beta = 1.f;
+    lanpaint_pipeline.lanpaint_friction = 15.f;
+    lanpaint_pipeline.lanpaint_early_stop = 1;
+    lanpaint_pipeline.lanpaint_prompt_first = false;
+    lanpaint_pipeline.preserve_known = true;
+    lanpaint_pipeline.outpaint[0] = 0;
+    lanpaint_pipeline.outpaint[1] = 0;
+    lanpaint_pipeline.outpaint[2] = 0;
+    lanpaint_pipeline.outpaint[3] = 0;
+    lanpaint_pipeline.outpaint_set = false;
 
     // parse cli args
     {
 #if _WIN32
         setlocale(LC_ALL, "");
         wchar_t opt;
-        while ((opt = getopt(argc, argv, L"p:n:o:s:l:r:m:g:b:h")) != (wchar_t)-1)
+        while ((opt = getopt(argc, argv, L"p:n:o:i:k:x:s:l:r:m:g:b:h")) != (wchar_t)-1)
         {
             switch (opt)
             {
             case L'p':
-                prompt = optarg;
+                zimage_pipeline.prompt = optarg;
+                lanpaint_pipeline.prompt = zimage_pipeline.prompt;
                 break;
             case L'n':
-                negative_prompt = optarg;
+                zimage_pipeline.negative_prompt = optarg;
+                lanpaint_pipeline.negative_prompt = zimage_pipeline.negative_prompt;
                 break;
             case L'o':
-                outpath = optarg;
+                zimage_pipeline.outpath = optarg;
+                lanpaint_pipeline.outpath = zimage_pipeline.outpath;
                 break;
+            case L'i':
+                lanpaint_pipeline.inputpath = optarg;
+                break;
+            case L'k':
+                lanpaint_pipeline.maskpath = optarg;
+                break;
+            case L'x':
+            {
+                std::vector<int> list = parse_optarg_int_array(optarg);
+                if (list.size() != 4)
+                {
+                    print_usage();
+                    return -1;
+                }
+                for (int j = 0; j < 4; j++)
+                    lanpaint_pipeline.outpaint[j] = list[j];
+                lanpaint_pipeline.outpaint_set = true;
+                break;
+            }
             case L's':
             {
                 std::vector<int> list = parse_optarg_int_array(optarg);
@@ -154,26 +180,36 @@ int main(int argc, char** argv)
                     print_usage();
                     return -1;
                 }
-                width = list[0];
-                height = list[1];
+                zimage_pipeline.width = list[0];
+                zimage_pipeline.height = list[1];
+                lanpaint_pipeline.width = list[0];
+                lanpaint_pipeline.height = list[1];
+                lanpaint_pipeline.size_set = true;
                 break;
             }
             case L'l':
-                steps = _wtoi(optarg);
+                zimage_pipeline.steps = _wtoi(optarg);
+                lanpaint_pipeline.steps = zimage_pipeline.steps;
                 break;
             case L'r':
-                seed = _wtoi(optarg);
+                zimage_pipeline.seed = _wtoi(optarg);
+                lanpaint_pipeline.seed = zimage_pipeline.seed;
                 break;
             case L'm':
-                model = optarg;
+                zimage_pipeline.model = optarg;
+                lanpaint_pipeline.model = zimage_pipeline.model;
                 break;
             case L'g':
-                gpuid = _wtoi(optarg);
+                zimage_pipeline.gpuid = _wtoi(optarg);
+                lanpaint_pipeline.gpuid = zimage_pipeline.gpuid;
                 break;
             case L'b':
-                batch = _wtoi(optarg);
+                zimage_pipeline.batch = _wtoi(optarg);
+                lanpaint_pipeline.batch = zimage_pipeline.batch;
                 break;
             case L'h':
+                print_usage();
+                return 0;
             default:
                 print_usage();
                 return -1;
@@ -181,19 +217,41 @@ int main(int argc, char** argv)
         }
 #else // _WIN32
         int opt;
-        while ((opt = getopt(argc, argv, "p:n:o:s:l:r:m:g:b:h")) != -1)
+        while ((opt = getopt(argc, argv, "p:n:o:i:k:x:s:l:r:m:g:b:h")) != -1)
         {
             switch (opt)
             {
             case 'p':
-                prompt = optarg;
+                zimage_pipeline.prompt = optarg;
+                lanpaint_pipeline.prompt = zimage_pipeline.prompt;
                 break;
             case 'n':
-                negative_prompt = optarg;
+                zimage_pipeline.negative_prompt = optarg;
+                lanpaint_pipeline.negative_prompt = zimage_pipeline.negative_prompt;
                 break;
             case 'o':
-                outpath = optarg;
+                zimage_pipeline.outpath = optarg;
+                lanpaint_pipeline.outpath = zimage_pipeline.outpath;
                 break;
+            case 'i':
+                lanpaint_pipeline.inputpath = optarg;
+                break;
+            case 'k':
+                lanpaint_pipeline.maskpath = optarg;
+                break;
+            case 'x':
+            {
+                std::vector<int> list = parse_optarg_int_array(optarg);
+                if (list.size() != 4)
+                {
+                    print_usage();
+                    return -1;
+                }
+                for (int j = 0; j < 4; j++)
+                    lanpaint_pipeline.outpaint[j] = list[j];
+                lanpaint_pipeline.outpaint_set = true;
+                break;
+            }
             case 's':
             {
                 std::vector<int> list = parse_optarg_int_array(optarg);
@@ -202,26 +260,36 @@ int main(int argc, char** argv)
                     print_usage();
                     return -1;
                 }
-                width = list[0];
-                height = list[1];
+                zimage_pipeline.width = list[0];
+                zimage_pipeline.height = list[1];
+                lanpaint_pipeline.width = list[0];
+                lanpaint_pipeline.height = list[1];
+                lanpaint_pipeline.size_set = true;
                 break;
             }
             case 'l':
-                steps = atoi(optarg);
+                zimage_pipeline.steps = atoi(optarg);
+                lanpaint_pipeline.steps = zimage_pipeline.steps;
                 break;
             case 'r':
-                seed = atoi(optarg);
+                zimage_pipeline.seed = atoi(optarg);
+                lanpaint_pipeline.seed = zimage_pipeline.seed;
                 break;
             case 'm':
-                model = optarg;
+                zimage_pipeline.model = optarg;
+                lanpaint_pipeline.model = zimage_pipeline.model;
                 break;
             case 'g':
-                gpuid = atoi(optarg);
+                zimage_pipeline.gpuid = atoi(optarg);
+                lanpaint_pipeline.gpuid = zimage_pipeline.gpuid;
                 break;
             case 'b':
-                batch = atoi(optarg);
+                zimage_pipeline.batch = atoi(optarg);
+                lanpaint_pipeline.batch = zimage_pipeline.batch;
                 break;
             case 'h':
+                print_usage();
+                return 0;
             default:
                 print_usage();
                 return -1;
@@ -230,447 +298,25 @@ int main(int argc, char** argv)
 #endif // _WIN32
     }
 
-    if (prompt.empty() || outpath.empty())
+    if (zimage_pipeline.prompt.empty() || zimage_pipeline.outpath.empty())
     {
         print_usage();
         return -1;
     }
 
-    // assert width % 16 == 0
-    // assert height % 16 == 0
-    // assert (width / 16) * (height / 16) >= 32
-
-    if (width % 16 != 0 || height % 16 != 0)
+    if (!lanpaint_pipeline.inputpath.empty() || !lanpaint_pipeline.maskpath.empty() || lanpaint_pipeline.outpaint_set)
     {
-        fprintf(stderr, "width and height must be multiple of 16 but got %d and %d\n", width, height);
+        if (lanpaint_pipeline.inputpath.empty())
+        {
+            fprintf(stderr, "-k mask-image or -x outpaint requires -i input-image\n");
+            return -1;
+        }
+        if (lanpaint_pipeline.load() != 0)
+            return -1;
+        return lanpaint_pipeline.generate();
+    }
+
+    if (zimage_pipeline.load() != 0)
         return -1;
-    }
-
-    if ((width / 16) * (height / 16) < 32)
-    {
-        fprintf(stderr, "(width / 16) * (height / 16) must be >= 32\n");
-        return -1;
-    }
-
-    if (width > 2048 || height > 2048)
-    {
-        fprintf(stderr, "width and height must be <= 2048 but got %d and %d\n", width, height);
-        return -1;
-    }
-
-    if (batch <= 0)
-    {
-        fprintf(stderr, "batch must be > 0 but got %d\n", batch);
-        return -1;
-    }
-
-    float guidance_scale;
-    float scheduler_shift;
-    if (model.find(PATHSTR("z-image-turbo")) != path_t::npos)
-    {
-        guidance_scale = 0.f;
-        scheduler_shift = 3.f;
-        if (steps == -1)
-            steps = 9;
-    }
-    else if (model.find(PATHSTR("z-image")) != path_t::npos)
-    {
-        guidance_scale = 1.f;
-        scheduler_shift = 6.f;
-        if (steps == -1)
-            steps = 50;
-    }
-    else
-    {
-        fprintf(stderr, "unknown model dir type\n");
-        return -1;
-    }
-
-    if (gpuid == 233)
-    {
-        gpuid = ncnn::get_default_gpu_index();
-    }
-
-#if _WIN32
-    CoInitializeEx(NULL, COINIT_MULTITHREADED);
-#endif
-
-#if _WIN32
-    fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());
-    fwprintf(stderr, L"negative-prompt = %ls\n", negative_prompt.c_str());
-    fwprintf(stderr, L"output-path = %ls\n", outpath.c_str());
-    fwprintf(stderr, L"model = %ls\n", model.c_str());
-#else
-    fprintf(stderr, "prompt = %s\n", prompt.c_str());
-    fprintf(stderr, "negative-prompt = %s\n", negative_prompt.c_str());
-    fprintf(stderr, "output-path = %s\n", outpath.c_str());
-    fprintf(stderr, "model = %s\n", model.c_str());
-#endif
-    fprintf(stderr, "image-size = %d x %d\n", width, height);
-    fprintf(stderr, "steps = %d\n", steps);
-    fprintf(stderr, "seed = %d\n", seed);
-    fprintf(stderr, "gpu-id = %d\n", gpuid);
-    fprintf(stderr, "batch = %d\n", batch);
-
-    const bool apply_cfg = guidance_scale > 0.f;
-
-    ncnn::Option opt;
-    opt.vulkan_device_index = gpuid;
-    opt.use_vulkan_compute = gpuid >= 0;
-    opt.use_fp16_packed = false;
-    opt.use_fp16_storage = false;
-    opt.use_fp16_arithmetic = false;
-    opt.use_bf16_packed = gpuid >= 0;
-    opt.use_bf16_storage = gpuid >= 0;
-    // opt.use_mapped_model_loading = true;
-
-    // disable winograd for reducing vae vram usage
-    opt.use_winograd_convolution = false;
-
-    // estimate transformer and vae memory usage
-    const uint32_t heap_budget = gpuid >= 0 ? ncnn::get_gpu_device(gpuid)->get_heap_budget() : 0;
-
-    const uint32_t heap_usage_transformer = 13000 + (width * height / (1024 * 1024)) * 1000;
-    if (heap_budget < heap_usage_transformer)
-    {
-        // enable the magic option for low vram graphics  :P
-        opt.use_weights_in_host_memory = true;
-    }
-    NCNN_LOGE("low_vram = %d", opt.use_weights_in_host_memory);
-
-    int vae_tile_width = 0;
-    int vae_tile_height = 0;
-    {
-        int max_tile_area = (int)((float)heap_budget / 6000 * 1024 * 1024);
-        ZImage::get_optimal_tile_size(width, height, max_tile_area, &vae_tile_width, &vae_tile_height);
-
-        NCNN_LOGE("vae_tile_size = %d x %d", vae_tile_width, vae_tile_height);
-    }
-
-    if (batch > 1)
-    {
-        path_t filename = get_file_name_without_extension(outpath);
-        path_t ext = get_file_extension(outpath);
-#if _WIN32
-        fwprintf(stderr, L"batch generation enabled. output-path will be %ls-0.%ls %ls-1.%ls %ls-2.%ls ...\n", filename.c_str(), ext.c_str(), filename.c_str(), ext.c_str(), filename.c_str(), ext.c_str());
-#else
-        fprintf(stderr, "batch generation enabled. output-path will be %s-0.%s %s-1.%s %s-2.%s ...\n", filename.c_str(), ext.c_str(), filename.c_str(), ext.c_str(), filename.c_str(), ext.c_str());
-#endif
-    }
-
-    // tokenizer
-    std::vector<int> input_ids;
-    std::vector<int> neg_input_ids;
-    {
-        ZImage::Tokenizer tokenizer(model);
-
-        tokenizer.encode(prompt, input_ids);
-
-        if (apply_cfg)
-        {
-            tokenizer.encode(negative_prompt, neg_input_ids);
-        }
-    }
-
-    // text encoder
-    ncnn::Mat cap;
-    ncnn::Mat neg_cap;
-    {
-        ZImage::TextEncoder text_encoder;
-
-        text_encoder.load(model, opt);
-
-        text_encoder.process(input_ids, cap);
-
-        if (apply_cfg)
-        {
-            text_encoder.process(neg_input_ids, neg_cap);
-        }
-    }
-
-    // prepare latents
-    std::vector<ncnn::Mat> latents(batch);
-    for (int b = 0; b < batch; b++)
-    {
-        ZImage::generate_latent(width, height, seed + b, latents[b]);
-    }
-
-    const int patch_size = 2;
-    const int num_patches_w = latents[0].w / patch_size;
-    const int num_patches_h = latents[0].h / patch_size;
-
-    fprintf(stderr, "num_patches = %d x %d\n", num_patches_w, num_patches_h);
-
-    ncnn::Mat x_cos;
-    ncnn::Mat x_sin;
-    ncnn::Mat cap_cos;
-    ncnn::Mat cap_sin;
-    ncnn::Mat unified_cos;
-    ncnn::Mat unified_sin;
-    ZImage::generate_x_freqs(num_patches_w, num_patches_h, cap.h, x_cos, x_sin);
-    ZImage::generate_cap_freqs(cap.h, cap_cos, cap_sin);
-    ZImage::concat_along_h(x_cos, cap_cos, unified_cos);
-    ZImage::concat_along_h(x_sin, cap_sin, unified_sin);
-
-    ncnn::Mat neg_x_cos;
-    ncnn::Mat neg_x_sin;
-    ncnn::Mat neg_cap_cos;
-    ncnn::Mat neg_cap_sin;
-    ncnn::Mat neg_unified_cos;
-    ncnn::Mat neg_unified_sin;
-    if (apply_cfg)
-    {
-        ZImage::generate_x_freqs(num_patches_w, num_patches_h, neg_cap.h, neg_x_cos, neg_x_sin);
-        ZImage::generate_cap_freqs(neg_cap.h, neg_cap_cos, neg_cap_sin);
-        ZImage::concat_along_h(neg_x_cos, neg_cap_cos, neg_unified_cos);
-        ZImage::concat_along_h(neg_x_sin, neg_cap_sin, neg_unified_sin);
-    }
-
-    // cap_embedder
-    ncnn::Mat cap_embed;
-    ncnn::Mat neg_cap_embed;
-    {
-        ZImage::CapEmbedder cap_embedder;
-
-        cap_embedder.load(model, opt);
-
-        cap_embedder.process(cap, cap_embed);
-
-        if (apply_cfg)
-        {
-            cap_embedder.process(neg_cap, neg_cap_embed);
-        }
-    }
-
-    // context_refiner
-    ncnn::Mat cap_refine;
-    ncnn::Mat neg_cap_refine;
-    {
-        ZImage::ContextRefiner context_refiner;
-
-        context_refiner.load(model, opt);
-
-        context_refiner.process(cap_embed, cap_cos, cap_sin, cap_refine);
-
-        if (apply_cfg)
-        {
-            context_refiner.process(neg_cap_embed, neg_cap_cos, neg_cap_sin, neg_cap_refine);
-        }
-    }
-
-    // prepare timesteps
-    std::vector<float> sigmas;
-    std::vector<float> timesteps;
-    ZImage::prepare_timestamps(steps, scheduler_shift, sigmas, timesteps);
-
-    // t_embedder
-    ncnn::Mat t_embeds;
-    {
-        ZImage::TEmbedder t_embedder;
-
-        t_embedder.load(model, opt);
-
-        t_embedder.process(timesteps, t_embeds);
-    }
-
-    // diffusion transformer loop
-    {
-        ZImage::AllXEmbedder all_x_embedder;
-
-        all_x_embedder.load(model, opt);
-
-        ZImage::NoiseRefiner noise_refiner;
-
-        noise_refiner.load(model, opt);
-
-        ZImage::UnifiedRefiner unified_refiner;
-
-        unified_refiner.load(model, opt);
-
-        ZImage::AllFinalLayer all_final_layer;
-
-        all_final_layer.load(model, opt);
-
-        for (int b = 0; b < batch; b++)
-        {
-            // patchify
-            ncnn::Mat x;
-            ZImage::patchify(latents[b], x);
-
-            for (int z = 0; z < steps; z++)
-            {
-                ncnn::Mat t_embed = t_embeds.row_range(z, 1).clone();
-
-                // all_x_embedder
-                ncnn::Mat x_embed;
-                all_x_embedder.process(x, x_embed);
-
-                // noise_refiner
-                ncnn::Mat x_embed_refine;
-                noise_refiner.process(x_embed, x_cos, x_sin, t_embed, x_embed_refine);
-
-                // concat x_embed_refine and cap_refine
-                ncnn::Mat unified_embed;
-                ZImage::concat_along_h(x_embed_refine, cap_refine, unified_embed);
-
-                ncnn::Mat neg_unified_embed;
-                if (apply_cfg)
-                {
-                    ZImage::concat_along_h(x_embed_refine, neg_cap_refine, neg_unified_embed);
-                }
-
-                // unified
-                ncnn::Mat unified;
-                unified_refiner.process(unified_embed, unified_cos, unified_sin, t_embed, unified);
-
-                ncnn::Mat neg_unified;
-                if (apply_cfg)
-                {
-                    unified_refiner.process(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified);
-                }
-
-                // all_final_layer
-                ncnn::Mat unified_final;
-                all_final_layer.process(unified, t_embed, unified_final);
-
-                ncnn::Mat neg_unified_final;
-                if (apply_cfg)
-                {
-                    all_final_layer.process(neg_unified, t_embed, neg_unified_final);
-                }
-
-                if (apply_cfg)
-                {
-                    // apply cfg
-                    const int total = x.total();
-                    for (int i = 0; i < total; i++)
-                    {
-                        float pos = unified_final[i];
-                        float neg = neg_unified_final[i];
-
-                        unified_final[i] = pos + guidance_scale * (pos - neg);
-                    }
-                }
-
-                // euler scheduler step
-                {
-                    const float dt = sigmas[z + 1] - sigmas[z];
-
-                    const int total = x.total();
-                    for (int i = 0; i < total; i++)
-                    {
-                        x[i] = x[i] - dt * unified_final[i];
-                    }
-                }
-
-                if (batch > 1)
-                {
-                    fprintf(stderr, "step %d/%d of image %d/%d done\n", z + 1, steps, b + 1, batch);
-                }
-                else
-                {
-                    fprintf(stderr, "step %d/%d done\n", z + 1, steps);
-                }
-            }
-
-            // unpatchify
-            ZImage::unpatchify(x, latents[b]);
-        }
-    }
-
-    // vae decode and save image
-    {
-        const bool use_vae_tiled = vae_tile_width < width || vae_tile_height < height;
-
-        ZImage::VAE vae;
-
-        vae.load(model, use_vae_tiled, opt);
-
-        for (int b = 0; b < batch; b++)
-        {
-            // vae decode
-            ncnn::Mat outimage;
-            {
-                const float vae_scaling_factor = 0.3611f;
-                const float vae_shift_factor = 0.1159f;
-
-                for (int i = 0; i < latents[b].total(); i++)
-                {
-                    latents[b][i] = latents[b][i] / vae_scaling_factor + vae_shift_factor;
-                }
-
-                if (use_vae_tiled)
-                {
-                    vae.process_tiled(latents[b], vae_tile_width, vae_tile_height, outimage);
-                }
-                else
-                {
-                    vae.process(latents[b], outimage);
-                }
-            }
-
-            if (batch > 1)
-            {
-                fprintf(stderr, "vae of image %d/%d done\n", b + 1, batch);
-            }
-            else
-            {
-                fprintf(stderr, "vae done\n");
-            }
-
-            // save image
-            {
-                int success = 0;
-
-                path_t ext = get_file_extension(outpath);
-
-                path_t outpath_b = outpath;
-                if (batch > 1)
-                {
-                    path_t filename = get_file_name_without_extension(outpath);
-
-#if _WIN32
-                    wchar_t hnd[256];
-                    swprintf(hnd, 256, L"-%d.", b);
-#else
-                    char hnd[256];
-                    sprintf(hnd, "-%d.", b);
-#endif
-                    outpath_b = filename + hnd + ext;
-                }
-
-                if (ext == PATHSTR("webp") || ext == PATHSTR("WEBP"))
-                {
-                    success = webp_save(outpath_b.c_str(), outimage.w, outimage.h, outimage.elempack, (const unsigned char*)outimage.data);
-                }
-                else if (ext == PATHSTR("png") || ext == PATHSTR("PNG"))
-                {
-#if _WIN32
-                    success = wic_encode_image(outpath_b.c_str(), outimage.w, outimage.h, outimage.elempack, outimage.data);
-#else
-                    success = png_save(outpath_b.c_str(), outimage.w, outimage.h, outimage.elempack, (const unsigned char*)outimage.data);
-#endif
-                }
-                else if (ext == PATHSTR("jpg") || ext == PATHSTR("JPG") || ext == PATHSTR("jpeg") || ext == PATHSTR("JPEG"))
-                {
-#if _WIN32
-                    success = wic_encode_jpeg_image(outpath_b.c_str(), outimage.w, outimage.h, outimage.elempack, outimage.data);
-#else
-                    success = jpeg_save(outpath_b.c_str(), outimage.w, outimage.h, outimage.elempack, (const unsigned char*)outimage.data);
-#endif
-                }
-
-                if (!success)
-                {
-#if _WIN32
-                    fwprintf(stderr, L"encode image %ls failed\n", outpath_b.c_str());
-#else
-                    fprintf(stderr, "encode image %s failed\n", outpath_b.c_str());
-#endif
-                }
-            }
-        }
-    }
-
-    return 0;
+    return zimage_pipeline.generate();
 }
