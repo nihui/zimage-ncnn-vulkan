@@ -339,6 +339,10 @@ int NoiseRefiner::process_controlled(
         return -1;
     if (ex.input("63", h0) != 0)
         return -1;
+#if NCNN_VULKAN
+    if (ex.input("63", ncnn::VkMat()) != 0)
+        return -1;
+#endif
 
     if (ex.extract("out0", x_embed_refine) != 0)
         return -1;
@@ -377,6 +381,10 @@ int UnifiedRefiner::process_controlled(
         return -1;
     if (ex.input("203", h0) != 0)
         return -1;
+#if NCNN_VULKAN
+    if (ex.input("203", ncnn::VkMat()) != 0)
+        return -1;
+#endif
 
     ncnn::Mat h10;
     if (ex.extract("703", h10) != 0)
@@ -385,6 +393,10 @@ int UnifiedRefiner::process_controlled(
         return -1;
     if (ex.input("703", h10) != 0)
         return -1;
+#if NCNN_VULKAN
+    if (ex.input("703", ncnn::VkMat()) != 0)
+        return -1;
+#endif
 
     ncnn::Mat h20;
     if (ex.extract("1203", h20) != 0)
@@ -393,6 +405,10 @@ int UnifiedRefiner::process_controlled(
         return -1;
     if (ex.input("1203", h20) != 0)
         return -1;
+#if NCNN_VULKAN
+    if (ex.input("1203", ncnn::VkMat()) != 0)
+        return -1;
+#endif
 
     if (ex.extract("out0", unified) != 0)
         return -1;
