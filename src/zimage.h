@@ -35,6 +35,15 @@ void unpatchify(const ncnn::Mat& x, ncnn::Mat& latent);
 
 void get_optimal_tile_size(int width, int height, int max_tile_area, int* tile_width, int* tile_height);
 
+int prepare_control_x(
+    const ncnn::Mat& control_image,
+    const path_t& model,
+    bool use_vae_tiled,
+    int vae_tile_width,
+    int vae_tile_height,
+    const ncnn::Option& opt,
+    ncnn::Mat& control_x);
+
 class Tokenizer
 {
 public:
@@ -108,6 +117,16 @@ public:
 
     int process(const ncnn::Mat& x_embed, const ncnn::Mat& x_cos, const ncnn::Mat& x_sin, const ncnn::Mat& t_embed, ncnn::Mat& x_embed_refine) const;
 
+    int process_controlled(
+        const ncnn::Mat& x_embed,
+        const ncnn::Mat& x_cos,
+        const ncnn::Mat& x_sin,
+        const ncnn::Mat& t_embed,
+        const ncnn::Mat& hint0,
+        const ncnn::Mat& hint1,
+        float control_scale,
+        ncnn::Mat& x_embed_refine) const;
+
 private:
     ncnn::Net noise_refiner;
 };
@@ -119,8 +138,57 @@ public:
 
     int process(const ncnn::Mat& unified_embed, const ncnn::Mat& unified_cos, const ncnn::Mat& unified_sin, const ncnn::Mat& t_embed, ncnn::Mat& unified) const;
 
+    int process_controlled(
+        const ncnn::Mat& unified_embed,
+        const ncnn::Mat& unified_cos,
+        const ncnn::Mat& unified_sin,
+        const ncnn::Mat& t_embed,
+        const ncnn::Mat& hint0,
+        const ncnn::Mat& hint10,
+        const ncnn::Mat& hint20,
+        float control_scale,
+        ncnn::Mat& unified) const;
+
 private:
     ncnn::Net unified_refiner;
+};
+
+class ControlRefiner
+{
+public:
+    int load(const path_t& model, const ncnn::Option& opt);
+
+    int process(
+        const ncnn::Mat& control_x,
+        const ncnn::Mat& x_embed,
+        const ncnn::Mat& x_cos,
+        const ncnn::Mat& x_sin,
+        const ncnn::Mat& t_embed,
+        ncnn::Mat& hint0,
+        ncnn::Mat& hint1,
+        ncnn::Mat& control_context) const;
+
+private:
+    ncnn::Net control_refiner;
+};
+
+class ControlUnified
+{
+public:
+    int load(const path_t& model, const ncnn::Option& opt);
+
+    int process(
+        const ncnn::Mat& control_unified_embed,
+        const ncnn::Mat& unified_embed,
+        const ncnn::Mat& unified_cos,
+        const ncnn::Mat& unified_sin,
+        const ncnn::Mat& t_embed,
+        ncnn::Mat& hint0,
+        ncnn::Mat& hint1,
+        ncnn::Mat& hint2) const;
+
+private:
+    ncnn::Net control_unified;
 };
 
 class AllFinalLayer

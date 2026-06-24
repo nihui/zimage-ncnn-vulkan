@@ -110,22 +110,35 @@ int ZImagePipeline::generate() const
         return -1;
     }
 
+    const bool control_enabled = !controlpath.empty() && control_scale != 0.f;
+    if (control_enabled && model.find(PATHSTR("z-image-turbo")) == path_t::npos)
+    {
+        fprintf(stderr, "control image currently requires z-image-turbo model\n");
+        return -1;
+    }
+
 #if _WIN32
     fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());
     fwprintf(stderr, L"negative-prompt = %ls\n", negative_prompt.c_str());
     fwprintf(stderr, L"output-path = %ls\n", outpath.c_str());
     fwprintf(stderr, L"model = %ls\n", model.c_str());
+    if (control_enabled)
+        fwprintf(stderr, L"control-image = %ls\n", controlpath.c_str());
 #else
     fprintf(stderr, "prompt = %s\n", prompt.c_str());
     fprintf(stderr, "negative-prompt = %s\n", negative_prompt.c_str());
     fprintf(stderr, "output-path = %s\n", outpath.c_str());
     fprintf(stderr, "model = %s\n", model.c_str());
+    if (control_enabled)
+        fprintf(stderr, "control-image = %s\n", controlpath.c_str());
 #endif
     fprintf(stderr, "image-size = %d x %d\n", width, height);
     fprintf(stderr, "steps = %d\n", steps);
     fprintf(stderr, "seed = %d\n", seed);
     fprintf(stderr, "gpu-id = %d\n", loaded_gpuid);
     fprintf(stderr, "batch = %d\n", batch);
+    if (control_enabled)
+        fprintf(stderr, "control-scale = %g\n", control_scale);
 
     const bool apply_cfg = guidance_scale > 0.f;
 
@@ -156,6 +169,32 @@ int ZImagePipeline::generate() const
 #else
         fprintf(stderr, "batch generation enabled. output-path will be %s-0.%s %s-1.%s %s-2.%s ...\n", filename.c_str(), ext.c_str(), filename.c_str(), ext.c_str(), filename.c_str(), ext.c_str());
 #endif
+    }
+
+    ncnn::Mat control_x;
+    if (control_enabled)
+    {
+        ncnn::Mat control_image;
+        if (ImageIO::load_image(controlpath, control_image) != 0)
+        {
+#if _WIN32
+            fwprintf(stderr, L"load control image %ls failed\n", controlpath.c_str());
+#else
+            fprintf(stderr, "load control image %s failed\n", controlpath.c_str());
+#endif
+            return -1;
+        }
+
+        if (control_image.w != width || control_image.h != height)
+        {
+            fprintf(stderr, "control image size must match image-size %d x %d but got %d x %d\n",
+                    width, height, control_image.w, control_image.h);
+            return -1;
+        }
+
+        const bool use_vae_tiled = vae_tile_width < width || vae_tile_height < height;
+        if (ZImage::prepare_control_x(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x) != 0)
+            return -1;
     }
 
     // tokenizer
@@ -285,6 +324,22 @@ int ZImagePipeline::generate() const
 
         all_final_layer.load(model, opt);
 
+        ZImage::ControlRefiner control_refiner;
+        ZImage::ControlUnified control_unified;
+        if (control_enabled)
+        {
+            if (control_refiner.load(model, opt) != 0)
+            {
+                fprintf(stderr, "load control refiner failed\n");
+                return -1;
+            }
+            if (control_unified.load(model, opt) != 0)
+            {
+                fprintf(stderr, "load control unified failed\n");
+                return -1;
+            }
+        }
+
         for (int b = 0; b < batch; b++)
         {
             // patchify
@@ -301,7 +356,32 @@ int ZImagePipeline::generate() const
 
                 // noise_refiner
                 ncnn::Mat x_embed_refine;
-                noise_refiner.process(x_embed, x_cos, x_sin, t_embed, x_embed_refine);
+                ncnn::Mat control_context;
+                if (control_enabled)
+                {
+                    ncnn::Mat hint0;
+                    ncnn::Mat hint1;
+                    if (control_refiner.process(control_x, x_embed, x_cos, x_sin, t_embed, hint0, hint1, control_context) != 0)
+                        return -1;
+                    if (noise_refiner.process_controlled(x_embed, x_cos, x_sin, t_embed, hint0, hint1, control_scale, x_embed_refine) != 0)
+                        return -1;
+                }
+                else
+                {
+                    noise_refiner.process(x_embed, x_cos, x_sin, t_embed, x_embed_refine);
+                }
+
+                ncnn::Mat neg_x_embed_refine;
+                ncnn::Mat neg_control_context;
+                if (apply_cfg && control_enabled)
+                {
+                    ncnn::Mat neg_hint0;
+                    ncnn::Mat neg_hint1;
+                    if (control_refiner.process(control_x, x_embed, neg_x_cos, neg_x_sin, t_embed, neg_hint0, neg_hint1, neg_control_context) != 0)
+                        return -1;
+                    if (noise_refiner.process_controlled(x_embed, neg_x_cos, neg_x_sin, t_embed, neg_hint0, neg_hint1, control_scale, neg_x_embed_refine) != 0)
+                        return -1;
+                }
 
                 // concat x_embed_refine and cap_refine
                 ncnn::Mat unified_embed;
@@ -310,17 +390,50 @@ int ZImagePipeline::generate() const
                 ncnn::Mat neg_unified_embed;
                 if (apply_cfg)
                 {
-                    ZImage::concat_along_h(x_embed_refine, neg_cap_refine, neg_unified_embed);
+                    const ncnn::Mat& neg_refine = control_enabled ? neg_x_embed_refine : x_embed_refine;
+                    ZImage::concat_along_h(neg_refine, neg_cap_refine, neg_unified_embed);
                 }
 
                 // unified
                 ncnn::Mat unified;
-                unified_refiner.process(unified_embed, unified_cos, unified_sin, t_embed, unified);
+                if (control_enabled)
+                {
+                    ncnn::Mat control_unified_embed;
+                    ZImage::concat_along_h(control_context, cap_refine, control_unified_embed);
+
+                    ncnn::Mat hint0;
+                    ncnn::Mat hint10;
+                    ncnn::Mat hint20;
+                    if (control_unified.process(control_unified_embed, unified_embed, unified_cos, unified_sin, t_embed, hint0, hint10, hint20) != 0)
+                        return -1;
+                    if (unified_refiner.process_controlled(unified_embed, unified_cos, unified_sin, t_embed, hint0, hint10, hint20, control_scale, unified) != 0)
+                        return -1;
+                }
+                else
+                {
+                    unified_refiner.process(unified_embed, unified_cos, unified_sin, t_embed, unified);
+                }
 
                 ncnn::Mat neg_unified;
                 if (apply_cfg)
                 {
-                    unified_refiner.process(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified);
+                    if (control_enabled)
+                    {
+                        ncnn::Mat neg_control_unified_embed;
+                        ZImage::concat_along_h(neg_control_context, neg_cap_refine, neg_control_unified_embed);
+
+                        ncnn::Mat neg_hint0;
+                        ncnn::Mat neg_hint10;
+                        ncnn::Mat neg_hint20;
+                        if (control_unified.process(neg_control_unified_embed, neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hint0, neg_hint10, neg_hint20) != 0)
+                            return -1;
+                        if (unified_refiner.process_controlled(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hint0, neg_hint10, neg_hint20, control_scale, neg_unified) != 0)
+                            return -1;
+                    }
+                    else
+                    {
+                        unified_refiner.process(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_unified);
+                    }
                 }
 
                 // all_final_layer

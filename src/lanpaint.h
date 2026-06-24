@@ -20,6 +20,7 @@ public:
     path_t outpath;
     path_t inputpath;
     path_t maskpath;
+    path_t controlpath;
     path_t model;
 
     int width = 1024;
@@ -29,6 +30,7 @@ public:
     int seed = 0;
     int gpuid = 233;
     int batch = 1;
+    float control_scale = 1.f;
 
     int outpaint[4] = {0, 0, 0, 0};
     bool outpaint_set = false;
@@ -75,11 +77,14 @@ private:
         const ncnn::Mat& source_x,
         const ncnn::Mat& paint_mask_x,
         const ncnn::Mat& known_mask_x,
+        const ncnn::Mat& control_x,
         const ncnn::Option& opt,
         const std::vector<float>& sigmas,
         const ncnn::Mat& t_embeds,
         const ncnn::Mat& x_cos,
         const ncnn::Mat& x_sin,
+        const ncnn::Mat& neg_x_cos,
+        const ncnn::Mat& neg_x_sin,
         const ncnn::Mat& cap_refine,
         const ncnn::Mat& unified_cos,
         const ncnn::Mat& unified_sin,
@@ -88,6 +93,8 @@ private:
         const ncnn::Mat& neg_unified_sin,
         bool apply_cfg,
         float guidance_scale,
+        bool control_enabled,
+        float control_scale,
         int steps) const;
     void composite_known_pixels(ncnn::Mat& outimage, const ncnn::Mat& source_canvas, const ncnn::Mat& paint_mask_pixels) const;
 };

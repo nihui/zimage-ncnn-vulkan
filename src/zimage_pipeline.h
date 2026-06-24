@@ -15,6 +15,7 @@ public:
     path_t prompt;
     path_t negative_prompt;
     path_t outpath;
+    path_t controlpath;
     path_t model;
 
     int width = 1024;
@@ -23,6 +24,7 @@ public:
     int seed = 0;
     int gpuid = 233;
     int batch = 1;
+    float control_scale = 1.f;
 
     int load();
     int generate() const;
