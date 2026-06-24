@@ -357,8 +357,8 @@ int LanPaintPipeline::load()
     opt.use_fp16_packed = false;
     opt.use_fp16_storage = false;
     opt.use_fp16_arithmetic = false;
-    opt.use_bf16_packed = loaded_gpuid >= 0;
-    opt.use_bf16_storage = loaded_gpuid >= 0;
+    opt.use_bf16_packed = true;
+    opt.use_bf16_storage = true;
     // opt.use_mapped_model_loading = true;
 
     // disable winograd for reducing vae vram usage
