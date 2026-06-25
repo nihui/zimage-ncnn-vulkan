@@ -5,7 +5,7 @@
 ![CI](https://github.com/nihui/zimage-ncnn-vulkan/workflows/CI/badge.svg)
 ![download](https://img.shields.io/github/downloads/nihui/zimage-ncnn-vulkan/total.svg)
 
-ncnn implementation of Z-Image image generater.
+ncnn implementation of Z-Image image generator, with LanPaint inpaint/outpaint and ControlNet support.
 
 zimage-ncnn-vulkan uses [ncnn project](https://github.com/Tencent/ncnn) as the universal neural network inference framework.
 
@@ -22,6 +22,14 @@ This package includes all the binaries required. It is portable, so no CUDA or P
 Download the z-image-turbo and z-image model folders to the same directory as the executable file
 
 https://huggingface.co/nihui-szyl/z-image-ncnn/tree/main
+
+For ControlNet, download the z-image-control model folder to the same directory as z-image-turbo.
+
+```
+zimage-ncnn-vulkan
+z-image-turbo/
+z-image-control/
+```
 
 ## About Z-Image
 
@@ -51,8 +59,28 @@ https://github.com/Tongyi-MAI/Z-Image
 
 ### Example Command
 
+Text to image
+
 ```shell
 zimage-ncnn-vulkan.exe -p "風的彷徨." -o output.png
+```
+
+LanPaint inpaint
+
+```shell
+zimage-ncnn-vulkan.exe -i input.png -k mask.png -p "a cute girl" -o output.png
+```
+
+LanPaint outpaint
+
+```shell
+zimage-ncnn-vulkan.exe -i input.png -x 128,128,128,128 -p "a cute girl" -o output.png
+```
+
+ControlNet
+
+```shell
+zimage-ncnn-vulkan.exe -c pose.png -p "a cute girl, full body" -o output.png
 ```
 
 ### Full Usages
@@ -64,6 +92,11 @@ Usage: zimage-ncnn-vulkan -p prompt -o outfile [options]...
   -p prompt            prompt (default=rand)
   -n negative-prompt   negative prompt (optional)
   -o output-path       output image path (default=out.png)
+  -i input-image       input image for inpaint (optional)
+  -k mask-image        inpaint mask, white=paint black=preserve (optional)
+  -x l,t,r,b           outpaint by expanding input canvas (optional)
+  -c control-image     control image for ControlNet (optional)
+  -w control-scale     ControlNet scale (default=1.0)
   -s image-size        image resolution (default=1024,1024)
   -l steps             denoise steps (default=auto)
   -r random-seed       random seed (default=rand)
@@ -71,6 +104,10 @@ Usage: zimage-ncnn-vulkan -p prompt -o outfile [options]...
   -g gpu-id            gpu device to use (-1=cpu, default=auto)
   -b batch-size        batched generation (default=1)
 ```
+
+LanPaint inpaint/outpaint requires `-i input-image`. Inpaint uses `-k mask-image`, where white means repaint and black means preserve. Outpaint uses `-x left,top,right,bottom`.
+
+ControlNet uses `-c control-image`. The control image size must match the output image size. ControlNet currently requires the z-image-turbo model and the z-image-control model folder.
 
 If you encounter a crash or error, try upgrading your GPU driver:
 
@@ -210,9 +247,102 @@ cmake --build . -j 4
 </tr>
 </table>
 
+### LanPaint inpaint
+
+<table width="100%">
+<tr>
+<td colspan="4">
+
+<details>
+<summary>expand for full command</summary>
+
+```zimage-ncnn-vulkan.exe -i 2065820720.jpg -p "Holding a Hachiware plushie, the friend of both Chiikawa and Usagi" -k mask.jpg```
+
+</details>
+
+</td>
+</tr>
+<tr>
+<td width="60%" valign="middle"><img src="images/2065820720.jpg" width="50%"><img src="images/mask.jpg" width="50%"></td>
+<td width="1%" align="center" valign="middle">➡️</td>
+<td width="30%" valign="middle"><img src="images/inpaint.jpg" width="100%"></td>
+</tr>
+</table>
+
+### LanPaint outpaint
+
+<table width="100%">
+<tr>
+<td colspan="4">
+
+<details>
+<summary>expand for full command</summary>
+
+```zimage-ncnn-vulkan.exe -i 2065820720.jpg -p "A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer." -x 128,128,128,128```
+
+</details>
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle"><img src="images/2065820720.jpg" width="100%"></td>
+<td width="8%" align="center" valign="middle">➡️</td>
+<td width="50%" valign="middle"><img src="images/outpaint.jpg" width="100%"></td>
+</tr>
+</table>
+
+### ControlNet pose
+
+<table width="100%">
+<tr>
+<td colspan="3">
+
+<details>
+<summary>expand for full command</summary>
+
+```zimage-ncnn-vulkan.exe -p "A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer." -c pose.jpg```
+
+</details>
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle"><img src="images/pose.jpg" width="100%"></td>
+<td width="8%" align="center" valign="middle">➡️</td>
+<td width="40%" valign="middle"><img src="images/poseout.jpg" width="100%"></td>
+</tr>
+</table>
+
+### ControlNet canny
+
+<table width="100%">
+<tr>
+<td colspan="3">
+
+<details>
+<summary>expand for full command</summary>
+
+```zimage-ncnn-vulkan.exe -p "A half-length portrait in the warm light of a convenience store late at night. An East Asian beauty, holding milk, meets your gaze in front of the freezer." -c canny.jpg```
+
+</details>
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle"><img src="images/canny.jpg" width="100%"></td>
+<td width="8%" align="center" valign="middle">➡️</td>
+<td width="40%" valign="middle"><img src="images/cannyout.jpg" width="100%"></td>
+</tr>
+</table>
+
 ## Original Z-Image Project
 
 - https://github.com/Tongyi-MAI/Z-Image
+
+## Other Open-Source Projects Referenced
+
+- https://github.com/scraed/LanPaint for inpaint and outpaint pipeline
+- https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1 for Z-Image ControlNet model
 
 ## Other Open-Source Code Used
 
