@@ -90,6 +90,8 @@ static void print_usage()
     fprintf(stdout, "  -x l,t,r,b           outpaint by expanding input canvas (optional)\n");
     fprintf(stdout, "  -c control-image     control image for ControlNet (optional)\n");
     fprintf(stdout, "  -w control-scale     ControlNet scale (default=1.0)\n");
+    fprintf(stdout, "  -t                   Tile ControlNet upscale mode (optional)\n");
+    fprintf(stdout, "  -d denoise-strength  denoise strength for -t mode (default=0.5)\n");
     fprintf(stdout, "  -s image-size        image resolution (default=1024,1024)\n");
     fprintf(stdout, "  -l steps             denoise steps (default=auto)\n");
     fprintf(stdout, "  -r random-seed       random seed (default=rand)\n");
@@ -139,7 +141,7 @@ int main(int argc, char** argv)
 #if _WIN32
         setlocale(LC_ALL, "");
         wchar_t opt;
-        while ((opt = getopt(argc, argv, L"p:n:o:i:k:x:c:w:s:l:r:m:g:b:h")) != (wchar_t)-1)
+        while ((opt = getopt(argc, argv, L"p:n:o:i:k:x:c:w:td:s:l:r:m:g:b:h")) != (wchar_t)-1)
         {
             switch (opt)
             {
@@ -181,6 +183,12 @@ int main(int argc, char** argv)
             case L'w':
                 zimage_pipeline.control_scale = (float)_wtof(optarg);
                 lanpaint_pipeline.control_scale = zimage_pipeline.control_scale;
+                break;
+            case L't':
+                zimage_pipeline.control_tile = true;
+                break;
+            case L'd':
+                zimage_pipeline.denoise_strength = (float)_wtof(optarg);
                 break;
             case L's':
             {
@@ -227,7 +235,7 @@ int main(int argc, char** argv)
         }
 #else // _WIN32
         int opt;
-        while ((opt = getopt(argc, argv, "p:n:o:i:k:x:c:w:s:l:r:m:g:b:h")) != -1)
+        while ((opt = getopt(argc, argv, "p:n:o:i:k:x:c:w:td:s:l:r:m:g:b:h")) != -1)
         {
             switch (opt)
             {
@@ -269,6 +277,12 @@ int main(int argc, char** argv)
             case 'w':
                 zimage_pipeline.control_scale = (float)atof(optarg);
                 lanpaint_pipeline.control_scale = zimage_pipeline.control_scale;
+                break;
+            case 't':
+                zimage_pipeline.control_tile = true;
+                break;
+            case 'd':
+                zimage_pipeline.denoise_strength = (float)atof(optarg);
                 break;
             case 's':
             {
@@ -324,6 +338,11 @@ int main(int argc, char** argv)
 
     if (!lanpaint_pipeline.inputpath.empty() || !lanpaint_pipeline.maskpath.empty() || lanpaint_pipeline.outpaint_set)
     {
+        if (zimage_pipeline.control_tile)
+        {
+            fprintf(stderr, "-t tile control upscale cannot be used with LanPaint input, mask, or outpaint\n");
+            return -1;
+        }
         if (lanpaint_pipeline.inputpath.empty())
         {
             fprintf(stderr, "-k mask-image or -x outpaint requires -i input-image\n");
@@ -332,6 +351,12 @@ int main(int argc, char** argv)
         if (lanpaint_pipeline.load() != 0)
             return -1;
         return lanpaint_pipeline.generate();
+    }
+
+    if (zimage_pipeline.control_tile && zimage_pipeline.controlpath.empty())
+    {
+        fprintf(stderr, "-t tile control upscale requires -c control-image\n");
+        return -1;
     }
 
     if (zimage_pipeline.load() != 0)

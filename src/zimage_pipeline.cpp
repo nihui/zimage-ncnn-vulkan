@@ -5,9 +5,67 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include <algorithm>
 #include <vector>
 
 #include "image_io.h"
+
+static path_t get_control_tile_model_dir(const path_t& model)
+{
+    const path_t turbo_dirname = PATHSTR("z-image-turbo");
+    const size_t turbo_pos = model.rfind(turbo_dirname);
+    if (turbo_pos != path_t::npos)
+    {
+        path_t control_model = model;
+        control_model.replace(turbo_pos, turbo_dirname.size(), PATHSTR("z-image-control-tile"));
+        return control_model;
+    }
+
+    return PATHSTR("z-image-control-tile");
+}
+
+static float clamp_float(float v, float lo, float hi)
+{
+    return std::max(lo, std::min(hi, v));
+}
+
+static int resize_image_bilinear(const ncnn::Mat& image, int width, int height, ncnn::Mat& out)
+{
+    if (image.w == width && image.h == height)
+    {
+        out = image.clone();
+        return 0;
+    }
+
+    const int channels = image.elempack;
+    out.create(width, height, (size_t)channels, channels);
+
+    const unsigned char* src = (const unsigned char*)image.data;
+    unsigned char* dst = (unsigned char*)out.data;
+    if (channels == 1)
+    {
+        ncnn::resize_bilinear_c1(src, image.w, image.h, dst, width, height);
+        return 0;
+    }
+    if (channels == 2)
+    {
+        ncnn::resize_bilinear_c2(src, image.w, image.h, dst, width, height);
+        return 0;
+    }
+    if (channels == 3)
+    {
+        ncnn::resize_bilinear_c3(src, image.w, image.h, dst, width, height);
+        return 0;
+    }
+    if (channels == 4)
+    {
+        ncnn::resize_bilinear_c4(src, image.w, image.h, dst, width, height);
+        return 0;
+    }
+
+    fprintf(stderr, "unsupported image channels for resize %d\n", channels);
+    return -1;
+}
 
 int ZImagePipeline::load()
 {
@@ -110,27 +168,40 @@ int ZImagePipeline::generate() const
         return -1;
     }
 
-    const bool control_enabled = !controlpath.empty() && control_scale != 0.f;
-    if (control_enabled && model.find(PATHSTR("z-image-turbo")) == path_t::npos)
+    const bool control_image_enabled = !controlpath.empty();
+    const bool control_enabled = control_image_enabled && control_scale != 0.f;
+    if ((control_enabled || control_tile) && model.find(PATHSTR("z-image-turbo")) == path_t::npos)
     {
         fprintf(stderr, "control image currently requires z-image-turbo model\n");
         return -1;
     }
+    if (control_tile && !control_image_enabled)
+    {
+        fprintf(stderr, "tile control upscale requires -c control-image\n");
+        return -1;
+    }
+
+    const path_t control_model = control_tile ? get_control_tile_model_dir(model) : path_t();
+    const float denoise_strength = clamp_float(this->denoise_strength, 0.f, 1.f);
 
 #if _WIN32
     fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());
     fwprintf(stderr, L"negative-prompt = %ls\n", negative_prompt.c_str());
     fwprintf(stderr, L"output-path = %ls\n", outpath.c_str());
     fwprintf(stderr, L"model = %ls\n", model.c_str());
-    if (control_enabled)
+    if (control_enabled || control_tile)
         fwprintf(stderr, L"control-image = %ls\n", controlpath.c_str());
+    if ((control_enabled || control_tile) && !control_model.empty())
+        fwprintf(stderr, L"control-model = %ls\n", control_model.c_str());
 #else
     fprintf(stderr, "prompt = %s\n", prompt.c_str());
     fprintf(stderr, "negative-prompt = %s\n", negative_prompt.c_str());
     fprintf(stderr, "output-path = %s\n", outpath.c_str());
     fprintf(stderr, "model = %s\n", model.c_str());
-    if (control_enabled)
+    if (control_enabled || control_tile)
         fprintf(stderr, "control-image = %s\n", controlpath.c_str());
+    if ((control_enabled || control_tile) && !control_model.empty())
+        fprintf(stderr, "control-model = %s\n", control_model.c_str());
 #endif
     fprintf(stderr, "image-size = %d x %d\n", width, height);
     fprintf(stderr, "steps = %d\n", steps);
@@ -139,6 +210,8 @@ int ZImagePipeline::generate() const
     fprintf(stderr, "batch = %d\n", batch);
     if (control_enabled)
         fprintf(stderr, "control-scale = %g\n", control_scale);
+    if (control_tile)
+        fprintf(stderr, "control-tile = 1\nimage-denoise-strength = %g\n", denoise_strength);
 
     const bool apply_cfg = guidance_scale > 0.f;
 
@@ -172,7 +245,8 @@ int ZImagePipeline::generate() const
     }
 
     ncnn::Mat control_x;
-    if (control_enabled)
+    ncnn::Mat source_latent;
+    if (control_enabled || control_tile)
     {
         ncnn::Mat control_image;
         if (ImageIO::load_image(controlpath, control_image) != 0)
@@ -187,14 +261,31 @@ int ZImagePipeline::generate() const
 
         if (control_image.w != width || control_image.h != height)
         {
-            fprintf(stderr, "control image size must match image-size %d x %d but got %d x %d\n",
-                    width, height, control_image.w, control_image.h);
-            return -1;
+            if (!control_tile)
+            {
+                fprintf(stderr, "control image size must match image-size %d x %d but got %d x %d\n",
+                        width, height, control_image.w, control_image.h);
+                return -1;
+            }
+
+            fprintf(stderr, "resize control image = %d x %d -> %d x %d\n", control_image.w, control_image.h, width, height);
+            ncnn::Mat resized_control_image;
+            if (resize_image_bilinear(control_image, width, height, resized_control_image) != 0)
+                return -1;
+            control_image = resized_control_image;
         }
 
         const bool use_vae_tiled = vae_tile_width < width || vae_tile_height < height;
-        if (ZImage::prepare_control_x(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x) != 0)
-            return -1;
+        if (control_tile)
+        {
+            if (ZImage::prepare_control_x(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x, source_latent) != 0)
+                return -1;
+        }
+        else
+        {
+            if (ZImage::prepare_control_x(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x) != 0)
+                return -1;
+        }
     }
 
     // tokenizer
@@ -306,6 +397,35 @@ int ZImagePipeline::generate() const
         t_embedder.process(timesteps, t_embeds);
     }
 
+    int start_step = 0;
+    if (control_tile)
+    {
+        if (source_latent.empty())
+        {
+            fprintf(stderr, "tile control source latent is empty\n");
+            return -1;
+        }
+
+        if (source_latent.w != latents[0].w || source_latent.h != latents[0].h || source_latent.c != latents[0].c)
+        {
+            fprintf(stderr, "tile control source latent size mismatch, got %d x %d x %d expected %d x %d x %d\n",
+                    source_latent.w, source_latent.h, source_latent.c, latents[0].w, latents[0].h, latents[0].c);
+            return -1;
+        }
+
+        start_step = (int)((1.f - denoise_strength) * (steps - 1) + 0.5f);
+        start_step = std::max(0, std::min(steps - 1, start_step));
+        const float sigma = sigmas[start_step];
+        const int total = source_latent.total();
+        for (int b = 0; b < batch; b++)
+        {
+            for (int i = 0; i < total; i++)
+                latents[b][i] = sigma * latents[b][i] + (1.f - sigma) * source_latent[i];
+        }
+
+        fprintf(stderr, "tile control start-step = %d/%d sigma=%g\n", start_step + 1, steps, sigma);
+    }
+
     // diffusion transformer loop
     {
         ZImage::AllXEmbedder all_x_embedder;
@@ -328,12 +448,12 @@ int ZImagePipeline::generate() const
         ZImage::ControlUnified control_unified;
         if (control_enabled)
         {
-            if (control_refiner.load(model, opt) != 0)
+            if (control_refiner.load(model, control_model, opt) != 0)
             {
                 fprintf(stderr, "load control refiner failed\n");
                 return -1;
             }
-            if (control_unified.load(model, opt) != 0)
+            if (control_unified.load(model, control_model, opt) != 0)
             {
                 fprintf(stderr, "load control unified failed\n");
                 return -1;
@@ -346,7 +466,7 @@ int ZImagePipeline::generate() const
             ncnn::Mat x;
             ZImage::patchify(latents[b], x);
 
-            for (int z = 0; z < steps; z++)
+            for (int z = start_step; z < steps; z++)
             {
                 ncnn::Mat t_embed = t_embeds.row_range(z, 1).clone();
 
@@ -401,12 +521,10 @@ int ZImagePipeline::generate() const
                     ncnn::Mat control_unified_embed;
                     ZImage::concat_along_h(control_context, cap_refine, control_unified_embed);
 
-                    ncnn::Mat hint0;
-                    ncnn::Mat hint10;
-                    ncnn::Mat hint20;
-                    if (control_unified.process(control_unified_embed, unified_embed, unified_cos, unified_sin, t_embed, hint0, hint10, hint20) != 0)
+                    std::vector<ncnn::Mat> hints;
+                    if (control_unified.process(control_unified_embed, unified_embed, unified_cos, unified_sin, t_embed, hints) != 0)
                         return -1;
-                    if (unified_refiner.process_controlled(unified_embed, unified_cos, unified_sin, t_embed, hint0, hint10, hint20, control_scale, unified) != 0)
+                    if (unified_refiner.process_controlled(unified_embed, unified_cos, unified_sin, t_embed, hints, control_scale, unified) != 0)
                         return -1;
                 }
                 else
@@ -422,12 +540,10 @@ int ZImagePipeline::generate() const
                         ncnn::Mat neg_control_unified_embed;
                         ZImage::concat_along_h(neg_control_context, neg_cap_refine, neg_control_unified_embed);
 
-                        ncnn::Mat neg_hint0;
-                        ncnn::Mat neg_hint10;
-                        ncnn::Mat neg_hint20;
-                        if (control_unified.process(neg_control_unified_embed, neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hint0, neg_hint10, neg_hint20) != 0)
+                        std::vector<ncnn::Mat> neg_hints;
+                        if (control_unified.process(neg_control_unified_embed, neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hints) != 0)
                             return -1;
-                        if (unified_refiner.process_controlled(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hint0, neg_hint10, neg_hint20, control_scale, neg_unified) != 0)
+                        if (unified_refiner.process_controlled(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hints, control_scale, neg_unified) != 0)
                             return -1;
                     }
                     else
