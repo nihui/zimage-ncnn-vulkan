@@ -24,11 +24,13 @@ Download the z-image-turbo and z-image model folders to the same directory as th
 https://huggingface.co/nihui-szyl/z-image-ncnn/tree/main
 
 For ControlNet, download the z-image-control model folder to the same directory as z-image-turbo.
+For Tile ControlNet upscale, download the z-image-control-tile model folder too.
 
 ```
 zimage-ncnn-vulkan
 z-image-turbo/
 z-image-control/
+z-image-control-tile/
 ```
 
 ## About Z-Image
@@ -83,6 +85,12 @@ ControlNet
 zimage-ncnn-vulkan.exe -c pose.png -p "a cute girl, full body" -o output.png
 ```
 
+Tile ControlNet upscale
+
+```shell
+zimage-ncnn-vulkan.exe -c lowres.png -t -s 2048,2048 -p "a cute girl" -o output.png
+```
+
 ### Full Usages
 
 ```console
@@ -97,6 +105,7 @@ Usage: zimage-ncnn-vulkan -p prompt -o outfile [options]...
   -x l,t,r,b           outpaint by expanding input canvas (optional)
   -c control-image     control image for ControlNet (optional)
   -w control-scale     ControlNet scale (default=1.0)
+  -t                   Tile ControlNet upscale mode (optional)
   -s image-size        image resolution (default=1024,1024)
   -l steps             denoise steps (default=auto)
   -r random-seed       random seed (default=rand)
@@ -108,6 +117,8 @@ Usage: zimage-ncnn-vulkan -p prompt -o outfile [options]...
 LanPaint inpaint/outpaint requires `-i input-image`. Inpaint uses `-k mask-image`, where white means repaint and black means preserve. Outpaint uses `-x left,top,right,bottom`.
 
 ControlNet uses `-c control-image`. The control image size must match the output image size. ControlNet currently requires the z-image-turbo model and the z-image-control model folder.
+
+Tile ControlNet upscale uses `-c lowres-image -t -s target-width,target-height`. The low resolution image is resized internally to the target size and used as tile control. It loads ControlNet weights from z-image-control-tile.
 
 If you encounter a crash or error, try upgrading your GPU driver:
 

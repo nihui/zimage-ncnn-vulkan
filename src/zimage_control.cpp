@@ -223,7 +223,12 @@ int prepare_control_x(
 
 int ControlRefiner::load(const path_t& model, const ncnn::Option& opt)
 {
-    const path_t control_model = get_control_model_dir(model);
+    return load(model, path_t(), opt);
+}
+
+int ControlRefiner::load(const path_t& model, const path_t& control_model_dir, const ncnn::Option& opt)
+{
+    const path_t control_model = control_model_dir.empty() ? get_control_model_dir(model) : control_model_dir;
     path_t parampath = control_model + PATHSTR("/z_image_control_refiner.ncnn.param");
     path_t modelpath = control_model + PATHSTR("/z_image_control_refiner.ncnn.bin");
     parampath = sanitize_filepath(parampath);
@@ -268,7 +273,12 @@ int ControlRefiner::process(
 
 int ControlUnified::load(const path_t& model, const ncnn::Option& opt)
 {
-    const path_t control_model = get_control_model_dir(model);
+    return load(model, path_t(), opt);
+}
+
+int ControlUnified::load(const path_t& model, const path_t& control_model_dir, const ncnn::Option& opt)
+{
+    const path_t control_model = control_model_dir.empty() ? get_control_model_dir(model) : control_model_dir;
     path_t parampath = control_model + PATHSTR("/z_image_control_unified.ncnn.param");
     path_t modelpath = control_model + PATHSTR("/z_image_control_unified.ncnn.bin");
     parampath = sanitize_filepath(parampath);
@@ -293,6 +303,29 @@ int ControlUnified::process(
     ncnn::Mat& hint1,
     ncnn::Mat& hint2) const
 {
+    std::vector<ncnn::Mat> hints;
+    if (process(control_unified_embed, unified_embed, unified_cos, unified_sin, t_embed, hints) != 0)
+        return -1;
+    if (hints.size() != 3)
+    {
+        fprintf(stderr, "control unified expected 3 hints but got %d\n", (int)hints.size());
+        return -1;
+    }
+
+    hint0 = hints[0];
+    hint1 = hints[1];
+    hint2 = hints[2];
+    return 0;
+}
+
+int ControlUnified::process(
+    const ncnn::Mat& control_unified_embed,
+    const ncnn::Mat& unified_embed,
+    const ncnn::Mat& unified_cos,
+    const ncnn::Mat& unified_sin,
+    const ncnn::Mat& t_embed,
+    std::vector<ncnn::Mat>& hints) const
+{
     ncnn::Extractor ex = control_unified.create_extractor();
 
     ex.input("in0", control_unified_embed);
@@ -301,12 +334,13 @@ int ControlUnified::process(
     ex.input("in3", unified_sin);
     ex.input("in4", t_embed);
 
-    if (ex.extract("out0", hint0) != 0)
-        return -1;
-    if (ex.extract("out1", hint1) != 0)
-        return -1;
-    if (ex.extract("out2", hint2) != 0)
-        return -1;
+    const std::vector<const char*>& output_names = control_unified.output_names();
+    hints.resize(output_names.size());
+    for (size_t i = 0; i < output_names.size(); i++)
+    {
+        if (ex.extract(output_names[i], hints[i]) != 0)
+            return -1;
+    }
 
     return 0;
 }
@@ -324,6 +358,8 @@ int NoiseRefiner::process_controlled(
     if (control_scale == 0.f)
         return process(x_embed, x_cos, x_sin, t_embed, x_embed_refine);
 
+    static const char noise_refiner_hint_blob[] = "63";
+
     ncnn::Extractor ex = noise_refiner.create_extractor();
 
     ex.input("in0", x_embed);
@@ -332,15 +368,15 @@ int NoiseRefiner::process_controlled(
     ex.input("in3", t_embed);
 
     ncnn::Mat h0;
-    if (ex.extract("63", h0) != 0)
+    if (ex.extract(noise_refiner_hint_blob, h0) != 0)
         return -1;
 
     if (add_scaled(h0, hint0, control_scale, h0) != 0)
         return -1;
-    if (ex.input("63", h0) != 0)
+    if (ex.input(noise_refiner_hint_blob, h0) != 0)
         return -1;
 #if NCNN_VULKAN
-    if (ex.input("63", ncnn::VkMat()) != 0)
+    if (ex.input(noise_refiner_hint_blob, ncnn::VkMat()) != 0)
         return -1;
 #endif
 
@@ -364,8 +400,48 @@ int UnifiedRefiner::process_controlled(
     float control_scale,
     ncnn::Mat& unified) const
 {
+    std::vector<ncnn::Mat> hints(3);
+    hints[0] = hint0;
+    hints[1] = hint10;
+    hints[2] = hint20;
+    return process_controlled(unified_embed, unified_cos, unified_sin, t_embed, hints, control_scale, unified);
+}
+
+int UnifiedRefiner::process_controlled(
+    const ncnn::Mat& unified_embed,
+    const ncnn::Mat& unified_cos,
+    const ncnn::Mat& unified_sin,
+    const ncnn::Mat& t_embed,
+    const std::vector<ncnn::Mat>& hints,
+    float control_scale,
+    ncnn::Mat& unified) const
+{
     if (control_scale == 0.f)
         return process(unified_embed, unified_cos, unified_sin, t_embed, unified);
+
+    if (hints.empty())
+    {
+        fprintf(stderr, "control unified hints are empty\n");
+        return -1;
+    }
+
+    static const char* hint_blob_ids_lite[] = {"203", "703", "1203"};
+    static const char* hint_blob_ids_full[] = {"203", "303", "403", "503", "603", "703", "803", "903", "1003", "1103", "1203", "1303", "1403", "1503", "1603"};
+
+    const char** hint_blob_ids = 0;
+    if (hints.size() == sizeof(hint_blob_ids_lite) / sizeof(hint_blob_ids_lite[0]))
+    {
+        hint_blob_ids = hint_blob_ids_lite;
+    }
+    else if (hints.size() == sizeof(hint_blob_ids_full) / sizeof(hint_blob_ids_full[0]))
+    {
+        hint_blob_ids = hint_blob_ids_full;
+    }
+    else
+    {
+        fprintf(stderr, "unsupported control unified hint count %d\n", (int)hints.size());
+        return -1;
+    }
 
     ncnn::Extractor ex = unified_refiner.create_extractor();
 
@@ -374,41 +450,22 @@ int UnifiedRefiner::process_controlled(
     ex.input("in2", unified_sin);
     ex.input("in3", t_embed);
 
-    ncnn::Mat h0;
-    if (ex.extract("203", h0) != 0)
-        return -1;
-    if (add_scaled(h0, hint0, control_scale, h0) != 0)
-        return -1;
-    if (ex.input("203", h0) != 0)
-        return -1;
-#if NCNN_VULKAN
-    if (ex.input("203", ncnn::VkMat()) != 0)
-        return -1;
-#endif
+    for (size_t i = 0; i < hints.size(); i++)
+    {
+        const char* blob_name = hint_blob_ids[i];
 
-    ncnn::Mat h10;
-    if (ex.extract("703", h10) != 0)
-        return -1;
-    if (add_scaled(h10, hint10, control_scale, h10) != 0)
-        return -1;
-    if (ex.input("703", h10) != 0)
-        return -1;
+        ncnn::Mat h;
+        if (ex.extract(blob_name, h) != 0)
+            return -1;
+        if (add_scaled(h, hints[i], control_scale, h) != 0)
+            return -1;
+        if (ex.input(blob_name, h) != 0)
+            return -1;
 #if NCNN_VULKAN
-    if (ex.input("703", ncnn::VkMat()) != 0)
-        return -1;
+        if (ex.input(blob_name, ncnn::VkMat()) != 0)
+            return -1;
 #endif
-
-    ncnn::Mat h20;
-    if (ex.extract("1203", h20) != 0)
-        return -1;
-    if (add_scaled(h20, hint20, control_scale, h20) != 0)
-        return -1;
-    if (ex.input("1203", h20) != 0)
-        return -1;
-#if NCNN_VULKAN
-    if (ex.input("1203", ncnn::VkMat()) != 0)
-        return -1;
-#endif
+    }
 
     if (ex.extract("out0", unified) != 0)
         return -1;

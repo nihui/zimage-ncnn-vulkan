@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 // ncnn
 #include "net.h"
@@ -149,6 +150,15 @@ public:
         float control_scale,
         ncnn::Mat& unified) const;
 
+    int process_controlled(
+        const ncnn::Mat& unified_embed,
+        const ncnn::Mat& unified_cos,
+        const ncnn::Mat& unified_sin,
+        const ncnn::Mat& t_embed,
+        const std::vector<ncnn::Mat>& hints,
+        float control_scale,
+        ncnn::Mat& unified) const;
+
 private:
     ncnn::Net unified_refiner;
 };
@@ -157,6 +167,7 @@ class ControlRefiner
 {
 public:
     int load(const path_t& model, const ncnn::Option& opt);
+    int load(const path_t& model, const path_t& control_model, const ncnn::Option& opt);
 
     int process(
         const ncnn::Mat& control_x,
@@ -176,6 +187,7 @@ class ControlUnified
 {
 public:
     int load(const path_t& model, const ncnn::Option& opt);
+    int load(const path_t& model, const path_t& control_model, const ncnn::Option& opt);
 
     int process(
         const ncnn::Mat& control_unified_embed,
@@ -186,6 +198,14 @@ public:
         ncnn::Mat& hint0,
         ncnn::Mat& hint1,
         ncnn::Mat& hint2) const;
+
+    int process(
+        const ncnn::Mat& control_unified_embed,
+        const ncnn::Mat& unified_embed,
+        const ncnn::Mat& unified_cos,
+        const ncnn::Mat& unified_sin,
+        const ncnn::Mat& t_embed,
+        std::vector<ncnn::Mat>& hints) const;
 
 private:
     ncnn::Net control_unified;

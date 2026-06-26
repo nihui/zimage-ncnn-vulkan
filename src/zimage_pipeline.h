@@ -18,6 +18,7 @@ public:
     path_t controlpath;
     path_t model;
 
+    bool control_tile = false;
     int width = 1024;
     int height = 1024;
     int steps = -1;
@@ -25,6 +26,7 @@ public:
     int gpuid = 233;
     int batch = 1;
     float control_scale = 1.f;
+    bool control_scale_set = false;
 
     int load();
     int generate() const;
