@@ -149,15 +149,14 @@ static path_t get_control_model_dir(const path_t& model)
     return model;
 }
 
-static int prepare_control_x_impl(
+int prepare_control_x(
     const ncnn::Mat& control_image,
     const path_t& model,
     bool use_vae_tiled,
     int vae_tile_width,
     int vae_tile_height,
     const ncnn::Option& opt,
-    ncnn::Mat& control_x,
-    ncnn::Mat& control_latent)
+    ncnn::Mat& control_x)
 {
     if (control_image.empty())
     {
@@ -168,6 +167,7 @@ static int prepare_control_x_impl(
     ncnn::Mat control_image_float;
     image_to_ncnn_rgb_float(control_image, control_image_float);
 
+    ncnn::Mat control_latent;
     {
         VAEEncoder vae_encoder;
         if (vae_encoder.load(model, use_vae_tiled, opt) != 0)
@@ -219,32 +219,6 @@ static int prepare_control_x_impl(
     }
 
     return 0;
-}
-
-int prepare_control_x(
-    const ncnn::Mat& control_image,
-    const path_t& model,
-    bool use_vae_tiled,
-    int vae_tile_width,
-    int vae_tile_height,
-    const ncnn::Option& opt,
-    ncnn::Mat& control_x)
-{
-    ncnn::Mat control_latent;
-    return prepare_control_x_impl(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x, control_latent);
-}
-
-int prepare_control_x(
-    const ncnn::Mat& control_image,
-    const path_t& model,
-    bool use_vae_tiled,
-    int vae_tile_width,
-    int vae_tile_height,
-    const ncnn::Option& opt,
-    ncnn::Mat& control_x,
-    ncnn::Mat& control_latent)
-{
-    return prepare_control_x_impl(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x, control_latent);
 }
 
 int ControlRefiner::load(const path_t& model, const ncnn::Option& opt)

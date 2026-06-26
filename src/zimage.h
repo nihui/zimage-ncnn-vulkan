@@ -45,16 +45,6 @@ int prepare_control_x(
     const ncnn::Option& opt,
     ncnn::Mat& control_x);
 
-int prepare_control_x(
-    const ncnn::Mat& control_image,
-    const path_t& model,
-    bool use_vae_tiled,
-    int vae_tile_width,
-    int vae_tile_height,
-    const ncnn::Option& opt,
-    ncnn::Mat& control_x,
-    ncnn::Mat& control_latent);
-
 class Tokenizer
 {
 public:

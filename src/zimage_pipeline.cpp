@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <algorithm>
 #include <vector>
 
 #include "image_io.h"
@@ -22,11 +21,6 @@ static path_t get_control_tile_model_dir(const path_t& model)
     }
 
     return PATHSTR("z-image-control-tile");
-}
-
-static float clamp_float(float v, float lo, float hi)
-{
-    return std::max(lo, std::min(hi, v));
 }
 
 static int resize_image_bilinear(const ncnn::Mat& image, int width, int height, ncnn::Mat& out)
@@ -183,7 +177,6 @@ int ZImagePipeline::generate() const
     }
 
     const path_t control_model = control_tile ? get_control_tile_model_dir(model) : path_t();
-    const float denoise_strength = clamp_float(this->denoise_strength, 0.f, 1.f);
 
 #if _WIN32
     fwprintf(stderr, L"prompt = %ls\n", prompt.c_str());
@@ -212,7 +205,7 @@ int ZImagePipeline::generate() const
     if (control_enabled)
         fprintf(stderr, "control-scale = %g\n", control_context_scale);
     if (control_tile)
-        fprintf(stderr, "control-tile = 1\nimage-denoise-strength = %g\n", denoise_strength);
+        fprintf(stderr, "control-tile = 1\n");
 
     const bool apply_cfg = guidance_scale > 0.f;
 
@@ -246,7 +239,6 @@ int ZImagePipeline::generate() const
     }
 
     ncnn::Mat control_x;
-    ncnn::Mat source_latent;
     if (control_enabled || control_tile)
     {
         ncnn::Mat control_image;
@@ -277,16 +269,8 @@ int ZImagePipeline::generate() const
         }
 
         const bool use_vae_tiled = vae_tile_width < width || vae_tile_height < height;
-        if (control_tile)
-        {
-            if (ZImage::prepare_control_x(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x, source_latent) != 0)
-                return -1;
-        }
-        else
-        {
-            if (ZImage::prepare_control_x(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x) != 0)
-                return -1;
-        }
+        if (ZImage::prepare_control_x(control_image, model, use_vae_tiled, vae_tile_width, vae_tile_height, opt, control_x) != 0)
+            return -1;
     }
 
     // tokenizer
@@ -398,35 +382,6 @@ int ZImagePipeline::generate() const
         t_embedder.process(timesteps, t_embeds);
     }
 
-    int start_step = 0;
-    if (control_tile)
-    {
-        if (source_latent.empty())
-        {
-            fprintf(stderr, "tile control source latent is empty\n");
-            return -1;
-        }
-
-        if (source_latent.w != latents[0].w || source_latent.h != latents[0].h || source_latent.c != latents[0].c)
-        {
-            fprintf(stderr, "tile control source latent size mismatch, got %d x %d x %d expected %d x %d x %d\n",
-                    source_latent.w, source_latent.h, source_latent.c, latents[0].w, latents[0].h, latents[0].c);
-            return -1;
-        }
-
-        start_step = (int)((1.f - denoise_strength) * (steps - 1) + 0.5f);
-        start_step = std::max(0, std::min(steps - 1, start_step));
-        const float sigma = sigmas[start_step];
-        const int total = source_latent.total();
-        for (int b = 0; b < batch; b++)
-        {
-            for (int i = 0; i < total; i++)
-                latents[b][i] = sigma * latents[b][i] + (1.f - sigma) * source_latent[i];
-        }
-
-        fprintf(stderr, "tile control start-step = %d/%d sigma=%g\n", start_step + 1, steps, sigma);
-    }
-
     // diffusion transformer loop
     {
         ZImage::AllXEmbedder all_x_embedder;
@@ -467,7 +422,7 @@ int ZImagePipeline::generate() const
             ncnn::Mat x;
             ZImage::patchify(latents[b], x);
 
-            for (int z = start_step; z < steps; z++)
+            for (int z = 0; z < steps; z++)
             {
                 ncnn::Mat t_embed = t_embeds.row_range(z, 1).clone();
 

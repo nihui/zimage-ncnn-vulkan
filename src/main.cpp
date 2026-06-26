@@ -91,7 +91,6 @@ static void print_usage()
     fprintf(stdout, "  -c control-image     control image for ControlNet (optional)\n");
     fprintf(stdout, "  -w control-scale     ControlNet scale (default=1.0)\n");
     fprintf(stdout, "  -t                   Tile ControlNet upscale mode (optional)\n");
-    fprintf(stdout, "  -d denoise-strength  denoise strength for -t mode (default=1.0)\n");
     fprintf(stdout, "  -s image-size        image resolution (default=1024,1024)\n");
     fprintf(stdout, "  -l steps             denoise steps (default=auto)\n");
     fprintf(stdout, "  -r random-seed       random seed (default=rand)\n");
@@ -141,7 +140,7 @@ int main(int argc, char** argv)
 #if _WIN32
         setlocale(LC_ALL, "");
         wchar_t opt;
-        while ((opt = getopt(argc, argv, L"p:n:o:i:k:x:c:w:td:s:l:r:m:g:b:h")) != (wchar_t)-1)
+        while ((opt = getopt(argc, argv, L"p:n:o:i:k:x:c:w:ts:l:r:m:g:b:h")) != (wchar_t)-1)
         {
             switch (opt)
             {
@@ -188,9 +187,6 @@ int main(int argc, char** argv)
             case L't':
                 zimage_pipeline.control_tile = true;
                 break;
-            case L'd':
-                zimage_pipeline.denoise_strength = (float)_wtof(optarg);
-                break;
             case L's':
             {
                 std::vector<int> list = parse_optarg_int_array(optarg);
@@ -236,7 +232,7 @@ int main(int argc, char** argv)
         }
 #else // _WIN32
         int opt;
-        while ((opt = getopt(argc, argv, "p:n:o:i:k:x:c:w:td:s:l:r:m:g:b:h")) != -1)
+        while ((opt = getopt(argc, argv, "p:n:o:i:k:x:c:w:ts:l:r:m:g:b:h")) != -1)
         {
             switch (opt)
             {
@@ -282,9 +278,6 @@ int main(int argc, char** argv)
                 break;
             case 't':
                 zimage_pipeline.control_tile = true;
-                break;
-            case 'd':
-                zimage_pipeline.denoise_strength = (float)atof(optarg);
                 break;
             case 's':
             {
