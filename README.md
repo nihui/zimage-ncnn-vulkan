@@ -88,7 +88,7 @@ zimage-ncnn-vulkan.exe -c pose.png -p "a cute girl, full body" -o output.png
 Tile ControlNet upscale
 
 ```shell
-zimage-ncnn-vulkan.exe -c lowres.png -t -s 2048,2048 -d 0.5 -p "a cute girl" -o output.png
+zimage-ncnn-vulkan.exe -c lowres.png -t -s 2048,2048 -p "a cute girl" -o output.png
 ```
 
 ### Full Usages
@@ -106,7 +106,7 @@ Usage: zimage-ncnn-vulkan -p prompt -o outfile [options]...
   -c control-image     control image for ControlNet (optional)
   -w control-scale     ControlNet scale (default=1.0)
   -t                   Tile ControlNet upscale mode (optional)
-  -d denoise-strength  denoise strength for -t mode (default=0.5)
+  -d denoise-strength  denoise strength for -t mode (default=1.0)
   -s image-size        image resolution (default=1024,1024)
   -l steps             denoise steps (default=auto)
   -r random-seed       random seed (default=rand)
@@ -119,7 +119,7 @@ LanPaint inpaint/outpaint requires `-i input-image`. Inpaint uses `-k mask-image
 
 ControlNet uses `-c control-image`. The control image size must match the output image size. ControlNet currently requires the z-image-turbo model and the z-image-control model folder.
 
-Tile ControlNet upscale uses `-c lowres-image -t -s target-width,target-height`. The low resolution image is resized internally to the target size, encoded as init latent, and sampled with `-d denoise-strength`. It loads ControlNet weights from z-image-control-tile.
+Tile ControlNet upscale uses `-c lowres-image -t -s target-width,target-height`. The low resolution image is resized internally to the target size and used as tile control. By default it starts from noise for sharper regeneration. Setting `-d` below `1.0` mixes in the encoded input latent and preserves more of the resized input, but may keep low-resolution blur. It loads ControlNet weights from z-image-control-tile.
 
 If you encounter a crash or error, try upgrading your GPU driver:
 

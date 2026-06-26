@@ -168,8 +168,9 @@ int ZImagePipeline::generate() const
         return -1;
     }
 
+    const float control_context_scale = (control_tile && !control_scale_set) ? 0.85f : control_scale;
     const bool control_image_enabled = !controlpath.empty();
-    const bool control_enabled = control_image_enabled && control_scale != 0.f;
+    const bool control_enabled = control_image_enabled && control_context_scale != 0.f;
     if ((control_enabled || control_tile) && model.find(PATHSTR("z-image-turbo")) == path_t::npos)
     {
         fprintf(stderr, "control image currently requires z-image-turbo model\n");
@@ -209,7 +210,7 @@ int ZImagePipeline::generate() const
     fprintf(stderr, "gpu-id = %d\n", loaded_gpuid);
     fprintf(stderr, "batch = %d\n", batch);
     if (control_enabled)
-        fprintf(stderr, "control-scale = %g\n", control_scale);
+        fprintf(stderr, "control-scale = %g\n", control_context_scale);
     if (control_tile)
         fprintf(stderr, "control-tile = 1\nimage-denoise-strength = %g\n", denoise_strength);
 
@@ -483,7 +484,7 @@ int ZImagePipeline::generate() const
                     ncnn::Mat hint1;
                     if (control_refiner.process(control_x, x_embed, x_cos, x_sin, t_embed, hint0, hint1, control_context) != 0)
                         return -1;
-                    if (noise_refiner.process_controlled(x_embed, x_cos, x_sin, t_embed, hint0, hint1, control_scale, x_embed_refine) != 0)
+                    if (noise_refiner.process_controlled(x_embed, x_cos, x_sin, t_embed, hint0, hint1, control_context_scale, x_embed_refine) != 0)
                         return -1;
                 }
                 else
@@ -499,7 +500,7 @@ int ZImagePipeline::generate() const
                     ncnn::Mat neg_hint1;
                     if (control_refiner.process(control_x, x_embed, neg_x_cos, neg_x_sin, t_embed, neg_hint0, neg_hint1, neg_control_context) != 0)
                         return -1;
-                    if (noise_refiner.process_controlled(x_embed, neg_x_cos, neg_x_sin, t_embed, neg_hint0, neg_hint1, control_scale, neg_x_embed_refine) != 0)
+                    if (noise_refiner.process_controlled(x_embed, neg_x_cos, neg_x_sin, t_embed, neg_hint0, neg_hint1, control_context_scale, neg_x_embed_refine) != 0)
                         return -1;
                 }
 
@@ -524,7 +525,7 @@ int ZImagePipeline::generate() const
                     std::vector<ncnn::Mat> hints;
                     if (control_unified.process(control_unified_embed, unified_embed, unified_cos, unified_sin, t_embed, hints) != 0)
                         return -1;
-                    if (unified_refiner.process_controlled(unified_embed, unified_cos, unified_sin, t_embed, hints, control_scale, unified) != 0)
+                    if (unified_refiner.process_controlled(unified_embed, unified_cos, unified_sin, t_embed, hints, control_context_scale, unified) != 0)
                         return -1;
                 }
                 else
@@ -543,7 +544,7 @@ int ZImagePipeline::generate() const
                         std::vector<ncnn::Mat> neg_hints;
                         if (control_unified.process(neg_control_unified_embed, neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hints) != 0)
                             return -1;
-                        if (unified_refiner.process_controlled(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hints, control_scale, neg_unified) != 0)
+                        if (unified_refiner.process_controlled(neg_unified_embed, neg_unified_cos, neg_unified_sin, t_embed, neg_hints, control_context_scale, neg_unified) != 0)
                             return -1;
                     }
                     else

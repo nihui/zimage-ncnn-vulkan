@@ -91,7 +91,7 @@ static void print_usage()
     fprintf(stdout, "  -c control-image     control image for ControlNet (optional)\n");
     fprintf(stdout, "  -w control-scale     ControlNet scale (default=1.0)\n");
     fprintf(stdout, "  -t                   Tile ControlNet upscale mode (optional)\n");
-    fprintf(stdout, "  -d denoise-strength  denoise strength for -t mode (default=0.5)\n");
+    fprintf(stdout, "  -d denoise-strength  denoise strength for -t mode (default=1.0)\n");
     fprintf(stdout, "  -s image-size        image resolution (default=1024,1024)\n");
     fprintf(stdout, "  -l steps             denoise steps (default=auto)\n");
     fprintf(stdout, "  -r random-seed       random seed (default=rand)\n");
@@ -182,6 +182,7 @@ int main(int argc, char** argv)
                 break;
             case L'w':
                 zimage_pipeline.control_scale = (float)_wtof(optarg);
+                zimage_pipeline.control_scale_set = true;
                 lanpaint_pipeline.control_scale = zimage_pipeline.control_scale;
                 break;
             case L't':
@@ -276,6 +277,7 @@ int main(int argc, char** argv)
                 break;
             case 'w':
                 zimage_pipeline.control_scale = (float)atof(optarg);
+                zimage_pipeline.control_scale_set = true;
                 lanpaint_pipeline.control_scale = zimage_pipeline.control_scale;
                 break;
             case 't':

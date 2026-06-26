@@ -26,7 +26,8 @@ public:
     int gpuid = 233;
     int batch = 1;
     float control_scale = 1.f;
-    float denoise_strength = 0.5f;
+    bool control_scale_set = false;
+    float denoise_strength = 1.f;
 
     int load();
     int generate() const;
