@@ -346,6 +346,50 @@ cmake --build . -j 4
 </tr>
 </table>
 
+### ControlNet gray
+
+<table width="100%">
+<tr>
+<td colspan="3">
+
+<details>
+<summary>expand for full command</summary>
+
+```zimage-ncnn-vulkan.exe -p "A photorealistic square image of a traditional Japanese street in Kyoto at dusk after a light rain." -c gray.jpg```
+
+</details>
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle"><img src="images/gray.jpg" width="100%"></td>
+<td width="8%" align="center" valign="middle">➡️</td>
+<td width="40%" valign="middle"><img src="images/color.jpg" width="100%"></td>
+</tr>
+</table>
+
+### ControlNet tile low resolution
+
+<table width="100%">
+<tr>
+<td colspan="3">
+
+<details>
+<summary>expand for full command</summary>
+
+```zimage-ncnn-vulkan.exe -p "Aerial view of Arashiyama in autumn, a river winding through the center, flanked by mountains ablaze with vibrant, multicolored foliage." -c lowres.jpg -t -s 1024,1024```
+
+</details>
+
+</td>
+</tr>
+<tr>
+<td width="16%" valign="middle"><img src="images/lowres.jpg" width="100%"></td>
+<td width="8%" align="center" valign="middle">➡️</td>
+<td width="64%" valign="middle"><img src="images/highres.jpg" width="100%"></td>
+</tr>
+</table>
+
 ## Original Z-Image Project
 
 - https://github.com/Tongyi-MAI/Z-Image
